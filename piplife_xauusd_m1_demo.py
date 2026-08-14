@@ -8,8 +8,13 @@ TRAIL_PIPS = float(os.getenv("TRAIL_PIPS", "50"))
 def fmt_indicator(v):
     return f'{v:.2f}' if v is not None else 'N/A'
 
-DEMO_ONLY = os.getenv("DEMO_ONLY", "true").lower() == "true"
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1.0"))
+VELOCITY_WINDOW = float(os.getenv("VELOCITY_WINDOW", "5"))
+BASELINE_WINDOW = float(os.getenv("BASELINE_WINDOW", "30"))
+EXPANSION_MULTIPLIER = float(os.getenv("EXPANSION_MULTIPLIER", "2.0"))
+MIN_EXPANSION_MOVE = float(os.getenv("MIN_EXPANSION_MOVE", "0.10"))
+COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "5"))
+EXECUTE_ORDERS = os.getenv("EXECUTE_ORDERS", "true").lower() == "true"
 
 
 def mid(tick):
@@ -20,34 +25,7 @@ def minute(tick):
     return tick["time"].replace(second=0, microsecond=0)
 
 
-def rsi(closes, period=14):
-    if len(closes) < period + 1:
-        return None
-
-    changes = [
-        closes[i] - closes[i - 1]
-        for i in range(1, len(closes))
-    ]
-
-    gains = [max(x, 0) for x in changes[-period:]]
-    losses = [max(-x, 0) for x in changes[-period:]]
-
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
-    if avg_loss == 0:
-        return 100.0
-
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-
 async def main():
-
-    if not DEMO_ONLY:
-        raise RuntimeError(
-            "DEMO_ONLY must remain true for this demo build."
-        )
 
     token = os.environ["METAAPI_TOKEN"]
     account_id = os.environ["METAAPI_ACCOUNT_ID"]
@@ -99,11 +77,20 @@ async def main():
         print("NO FIXED TAKE PROFIT")
         print("OPPOSITE STOP = STOP LOSS + TAKE PROFIT")
         print("OPPOSITE STOP ALWAYS TRAILS")
-        print("DEMO SAFETY MODE: NO ORDERS SENT")
+        print("RSI: DISABLED")
+        print("MOMENTUM: DISABLED")
+        print("ENTRY: IMMEDIATE VELOCITY EXPANSION")
+        print("ORDERS ENABLED:", EXECUTE_ORDERS)
         print("========================================")
 
-        candles = []
-        current = None
+        from collections import deque
+        samples = deque(maxlen=240)
+
+        position = None
+        entry_price = None
+        reversal_level = None
+        last_signal_time = 0.0
+        expansion_armed = True
 
         while True:
 
@@ -112,133 +99,278 @@ async def main():
                 keep_subscription=True
             )
 
+            now = asyncio.get_running_loop().time()
             price = mid(tick)
-            candle_time = minute(tick)
 
-            if current is None:
+            samples.append((now, price))
 
-                current = {
-                    "time": candle_time,
-                    "open": price,
-                    "high": price,
-                    "low": price,
-                    "close": price
-                }
+            cutoff = now - BASELINE_WINDOW
 
+            while samples and samples[0][0] < cutoff:
+                samples.popleft()
+
+            if len(samples) < 3:
+                await asyncio.sleep(POLL_SECONDS)
                 continue
 
-            if candle_time == current["time"]:
+            window_start = now - VELOCITY_WINDOW
+            anchor = samples[0]
 
-                current["high"] = max(
-                    current["high"],
-                    price
-                )
+            for sample in samples:
+                if sample[0] >= window_start:
+                    anchor = sample
+                    break
 
-                current["low"] = min(
-                    current["low"],
-                    price
-                )
+            elapsed = now - anchor[0]
 
-                current["close"] = price
-
+            if elapsed <= 0:
+                await asyncio.sleep(POLL_SECONDS)
                 continue
 
-            if candle_time < current["time"]:
-                continue
+            move = price - anchor[1]
+            velocity = move / elapsed
+            abs_velocity = abs(velocity)
 
-            candles.append(current)
+            velocities = []
 
-            candles = candles[-60:]
+            previous_t, previous_p = samples[0]
 
-            print(
-                f"M1 {current['time']} "
-                f"O:{current['open']:.2f} "
-                f"H:{current['high']:.2f} "
-                f"L:{current['low']:.2f} "
-                f"C:{current['close']:.2f}"
+            for t, p_now in list(samples)[1:]:
+
+                dt = t - previous_t
+
+                if dt > 0:
+
+                    age = now - t
+
+                    if VELOCITY_WINDOW < age <= BASELINE_WINDOW:
+                        velocities.append(
+                            abs((p_now - previous_p) / dt)
+                        )
+
+                previous_t = t
+                previous_p = p_now
+
+            baseline = (
+                sum(velocities) / len(velocities)
+                if velocities else 0.0
             )
 
-            current = {
-                "time": candle_time,
-                "open": price,
-                "high": price,
-                "low": price,
-                "close": price
-            }
-
-            # IMMEDIATE MOMENTUM ENTRY
-            # Do not wait for 16 candles.
-            # The first directional close-to-close movement
-            # establishes the immediate momentum direction.
-
-            if len(candles) < 2:
-                continue
-
-            closes = [
-                candle["close"]
-                for candle in candles
-            ]
-
-            recent = candles[-min(14, len(candles)):]
-
-            atr = sum(
-                candle["high"] - candle["low"]
-                for candle in recent
-            ) / len(recent)
-
-            momentum = rsi(closes)
-
-            direction = None
-
-            price_momentum = closes[-1] - closes[-2]
-
-            if price_momentum > 0 and atr > 0:
-                direction = "BUY"
-
-            elif price_momentum < 0 and atr > 0:
-                direction = "SELL"
-
-            momentum_display = f"{momentum:.2f}" if momentum is not None else "N/A"
-
-            print(
-                f"SIGNAL "
-                f"PRICE={price:.2f} "
-                f"ATR={atr:.2f} "
-                f"RSI={momentum_display} "
-                f"BIAS={direction or 'NONE'}"
+            expansion = (
+                baseline > 0
+                and abs_velocity >= baseline * EXPANSION_MULTIPLIER
+                and abs(move) >= MIN_EXPANSION_MOVE
             )
 
-            if direction:
+            direction = (
+                "BUY"
+                if velocity > 0
+                else "SELL"
+                if velocity < 0
+                else None
+            )
 
-                if direction == "BUY":
+            print(
+                f"VELOCITY "
+                f"PRICE={price:.{digits}f} "
+                f"MOVE={move:.{digits}f} "
+                f"V={velocity:.{digits+2}f}/s "
+                f"BASE={baseline:.{digits+2}f}/s "
+                f"EXPANSION={'YES' if expansion else 'NO'}"
+            )
 
-                    entry = tick["ask"]
-                    opposite = "SELL STOP"
-                    stop = entry - trailing_distance
+            if position == "BUY":
 
-                else:
+                candidate = price - trailing_distance
 
-                    entry = tick["bid"]
-                    opposite = "BUY STOP"
-                    stop = entry + trailing_distance
+                if reversal_level is None:
+                    reversal_level = entry_price - trailing_distance
+
+                reversal_level = max(
+                    reversal_level,
+                    candidate
+                )
+
+                if price <= reversal_level:
+
+                    print(
+                        f"REVERSAL BUY -> SELL "
+                        f"@ {price:.{digits}f}"
+                    )
+
+                    try:
+
+                        if EXECUTE_ORDERS:
+
+                            positions = await connection.get_positions()
+
+                            for pos in positions:
+                                if pos.get("symbol") == SYMBOL:
+                                    await connection.close_position(
+                                        pos["id"]
+                                    )
+
+                            await connection.create_market_sell_order(
+                                SYMBOL,
+                                LOT_SIZE
+                            )
+
+                        position = "SELL"
+                        entry_price = price
+                        reversal_level = (
+                            price + trailing_distance
+                        )
+                        expansion_armed = False
+
+                    except Exception as e:
+                        print(
+                            "REVERSAL ERROR:",
+                            type(e).__name__,
+                            str(e)
+                        )
+
+            elif position == "SELL":
+
+                candidate = price + trailing_distance
+
+                if reversal_level is None:
+                    reversal_level = entry_price + trailing_distance
+
+                reversal_level = min(
+                    reversal_level,
+                    candidate
+                )
+
+                if price >= reversal_level:
+
+                    print(
+                        f"REVERSAL SELL -> BUY "
+                        f"@ {price:.{digits}f}"
+                    )
+
+                    try:
+
+                        if EXECUTE_ORDERS:
+
+                            positions = await connection.get_positions()
+
+                            for pos in positions:
+                                if pos.get("symbol") == SYMBOL:
+                                    await connection.close_position(
+                                        pos["id"]
+                                    )
+
+                            await connection.create_market_buy_order(
+                                SYMBOL,
+                                LOT_SIZE
+                            )
+
+                        position = "BUY"
+                        entry_price = price
+                        reversal_level = (
+                            price - trailing_distance
+                        )
+                        expansion_armed = False
+
+                    except Exception as e:
+                        print(
+                            "REVERSAL ERROR:",
+                            type(e).__name__,
+                            str(e)
+                        )
+
+            if (
+                not expansion
+                and abs_velocity <
+                max(
+                    baseline *
+                    (EXPANSION_MULTIPLIER * 0.75),
+                    1e-12
+                )
+            ):
+                expansion_armed = True
+
+            if (
+                position is None
+                and expansion
+                and direction
+                and expansion_armed
+                and now - last_signal_time >= COOLDOWN_SECONDS
+            ):
+
+                entry_price = (
+                    float(tick["ask"])
+                    if direction == "BUY"
+                    else float(tick["bid"])
+                )
+
+                reversal_level = (
+                    entry_price - trailing_distance
+                    if direction == "BUY"
+                    else entry_price + trailing_distance
+                )
 
                 print("")
-                print(">>> DEMO TRADE SIGNAL <<<")
-                print("Direction:", direction)
-                print("Volume:", LOT_SIZE)
-                print("Entry:", round(entry, digits))
+                print(">>> VELOCITY EXPANSION ENTRY <<<")
+                print("DIRECTION:", direction)
+                print("ENTRY:", round(entry_price, digits))
+                print("VELOCITY:", velocity)
+                print("BASELINE:", baseline)
                 print(
-                    "Opposite order:",
-                    opposite
+                    "REVERSAL LEVEL:",
+                    round(reversal_level, digits)
                 )
-                print(
-                    "Trailing stop:",
-                    round(stop, digits)
-                )
-                print(
-                    "Role: EXIT + REVERSAL"
-                )
-                print("ORDER SENT: NO")
+
+                try:
+
+                    if EXECUTE_ORDERS:
+
+                        if direction == "BUY":
+
+                            result = (
+                                await connection
+                                .create_market_buy_order(
+                                    SYMBOL,
+                                    LOT_SIZE
+                                )
+                            )
+
+                        else:
+
+                            result = (
+                                await connection
+                                .create_market_sell_order(
+                                    SYMBOL,
+                                    LOT_SIZE
+                                )
+                            )
+
+                        print("ORDER SENT: YES")
+                        print("ORDER RESULT:", result)
+
+                    else:
+
+                        print(
+                            "ORDER SENT: NO "
+                            "(EXECUTE_ORDERS=false)"
+                        )
+
+                    position = direction
+                    last_signal_time = now
+                    expansion_armed = False
+
+                except Exception as e:
+
+                    print(
+                        "ENTRY ORDER ERROR:",
+                        type(e).__name__,
+                        str(e)
+                    )
+
+                    position = None
+                    entry_price = None
+                    reversal_level = None
+
                 print("")
 
             await asyncio.sleep(POLL_SECONDS)
