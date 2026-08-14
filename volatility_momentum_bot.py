@@ -9,11 +9,11 @@ def fmt_indicator(v):
     return f'{v:.2f}' if v is not None else 'N/A'
 
 POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1.0"))
-VELOCITY_WINDOW = float(os.getenv("VELOCITY_WINDOW", "5"))
-BASELINE_WINDOW = float(os.getenv("BASELINE_WINDOW", "30"))
-EXPANSION_MULTIPLIER = float(os.getenv("EXPANSION_MULTIPLIER", "2.0"))
-MIN_EXPANSION_MOVE = float(os.getenv("MIN_EXPANSION_MOVE", "0.10"))
-COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "5"))
+VELOCITY_WINDOW = float(os.getenv("VELOCITY_WINDOW", "1.0"))
+BASELINE_WINDOW = float(os.getenv("BASELINE_WINDOW", "10.0"))
+EXPANSION_MULTIPLIER = float(os.getenv("EXPANSION_MULTIPLIER", "1.20"))
+MIN_EXPANSION_MOVE = float(os.getenv("MIN_EXPANSION_MOVE", "0.03"))
+COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "1.0"))
 EXECUTE_ORDERS = os.getenv("EXECUTE_ORDERS", "true").lower() == "true"
 
 
