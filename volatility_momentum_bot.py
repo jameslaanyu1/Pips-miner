@@ -214,10 +214,12 @@ async def get_dynamic_lot(
 
         try:
             result = await connection.calculate_margin(
-                symbol=SYMBOL,
-                order_type=order_type,
-                volume=volume,
-                open_price=float(price)
+                {
+                    "symbol": SYMBOL,
+                    "type": order_type,
+                    "volume": volume,
+                    "openPrice": float(price)
+                }
             )
         except Exception as exc:
             raise ValueError(
