@@ -1,5 +1,6 @@
 import os
 import asyncio
+import math
 from metaapi_cloud_sdk import MetaApi
 
 SYMBOL = "XAUUSD"
@@ -23,6 +24,29 @@ def mid(tick):
 
 def minute(tick):
     return tick["time"].replace(second=0, microsecond=0)
+
+
+def normalize_volume(raw, minimum, maximum, step):
+    minimum = max(float(minimum or 0.01), MIN_LOT)
+    maximum = min(float(maximum or MAX_LOT), MAX_LOT)
+    step = float(step or 0.01)
+    raw = float(LOT_SIZE_OVERRIDE) if LOT_SIZE_OVERRIDE else float(raw)
+    raw = max(minimum, min(raw, maximum))
+    steps = math.floor((raw - minimum + 1e-12) / step)
+    return round(max(minimum, min(minimum + steps * step, maximum)), 8)
+
+
+async def get_dynamic_lot(connection, specification):
+    info = await connection.get_account_information()
+    equity = float(info.get("equity") or info.get("balance") or 0.0)
+    raw = float(LOT_SIZE_OVERRIDE) if LOT_SIZE_OVERRIDE else (equity / BALANCE_PER_001_LOT) * 0.01
+    lot = normalize_volume(
+        raw,
+        specification.get("minVolume", 0.01),
+        specification.get("maxVolume", MAX_LOT),
+        specification.get("volumeStep", 0.01)
+    )
+    return lot, equity
 
 
 async def main():
@@ -66,10 +90,12 @@ async def main():
             point = 10 ** (-digits)
 
         trailing_distance = TRAIL_PIPS * point
+        dynamic_lot, equity = await get_dynamic_lot(connection, specification)
 
         print("RPC: CONNECTED")
         print("Symbol:", SYMBOL)
-        print("Lot:", LOT_SIZE)
+        print("Account equity:", round(equity, 2))
+        print("Calculated lot:", dynamic_lot)
         print("Trailing distance:", trailing_distance)
         print("")
         print("RULES:")
@@ -79,7 +105,9 @@ async def main():
         print("OPPOSITE STOP ALWAYS TRAILS")
         print("RSI: NOT USED")
         print("MOMENTUM: NOT USED")
-        print("ENTRY: IMMEDIATE VELOCITY EXPANSION")
+        print("ENTRY: FAST VELOCITY EXPANSION")
+        print("DIRECTION: LATEST PRICE MOVEMENT")
+        print("POSITION SIZE: ACCOUNT EQUITY")
         print("ORDERS ENABLED:", EXECUTE_ORDERS)
         print("========================================")
 
@@ -162,11 +190,14 @@ async def main():
                 and abs(move) >= MIN_EXPANSION_MOVE
             )
 
+            latest_delta = samples[-1][1] - samples[-2][1]
+            direction_velocity = latest_delta if latest_delta != 0 else velocity
+
             direction = (
                 "BUY"
-                if velocity > 0
+                if direction_velocity > 0
                 else "SELL"
-                if velocity < 0
+                if direction_velocity < 0
                 else None
             )
 
@@ -200,6 +231,11 @@ async def main():
 
                     try:
 
+                        lot, _ = await get_dynamic_lot(
+                            connection,
+                            specification
+                        )
+
                         if EXECUTE_ORDERS:
 
                             positions = await connection.get_positions()
@@ -212,7 +248,7 @@ async def main():
 
                             await connection.create_market_sell_order(
                                 SYMBOL,
-                                LOT_SIZE
+                                lot
                             )
 
                         position = "SELL"
@@ -250,6 +286,11 @@ async def main():
 
                     try:
 
+                        lot, _ = await get_dynamic_lot(
+                            connection,
+                            specification
+                        )
+
                         if EXECUTE_ORDERS:
 
                             positions = await connection.get_positions()
@@ -262,7 +303,7 @@ async def main():
 
                             await connection.create_market_buy_order(
                                 SYMBOL,
-                                LOT_SIZE
+                                lot
                             )
 
                         position = "BUY"
@@ -283,8 +324,7 @@ async def main():
                 not expansion
                 and abs_velocity <
                 max(
-                    baseline *
-                    (EXPANSION_MULTIPLIER * 0.75),
+                    baseline * 0.95,
                     1e-12
                 )
             ):
@@ -323,6 +363,14 @@ async def main():
 
                 try:
 
+                    lot, equity = await get_dynamic_lot(
+                        connection,
+                        specification
+                    )
+
+                    print("ACCOUNT EQUITY:", round(equity, 2))
+                    print("POSITION SIZE:", lot)
+
                     if EXECUTE_ORDERS:
 
                         if direction == "BUY":
@@ -331,7 +379,7 @@ async def main():
                                 await connection
                                 .create_market_buy_order(
                                     SYMBOL,
-                                    LOT_SIZE
+                                    lot
                                 )
                             )
 
@@ -341,7 +389,7 @@ async def main():
                                 await connection
                                 .create_market_sell_order(
                                     SYMBOL,
-                                    LOT_SIZE
+                                    lot
                                 )
                             )
 
