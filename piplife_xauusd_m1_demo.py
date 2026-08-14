@@ -163,7 +163,12 @@ async def main():
                 "close": price
             }
 
-            if len(candles) < 16:
+            # IMMEDIATE MOMENTUM ENTRY
+            # Do not wait for 16 candles.
+            # The first directional close-to-close movement
+            # establishes the immediate momentum direction.
+
+            if len(candles) < 2:
                 continue
 
             closes = [
@@ -171,30 +176,24 @@ async def main():
                 for candle in candles
             ]
 
+            recent = candles[-min(14, len(candles)):]
+
             atr = sum(
                 candle["high"] - candle["low"]
-                for candle in candles[-14:]
-            ) / 14
+                for candle in recent
+            ) / len(recent)
 
             momentum = rsi(closes)
 
             direction = None
 
-            if momentum is not None:
+            price_momentum = closes[-1] - closes[-2]
 
-                if (
-                    closes[-1] > closes[-2]
-                    and momentum > 50
-                    and atr > 0
-                ):
-                    direction = "BUY"
+            if price_momentum > 0 and atr > 0:
+                direction = "BUY"
 
-                elif (
-                    closes[-1] < closes[-2]
-                    and momentum < 50
-                    and atr > 0
-                ):
-                    direction = "SELL"
+            elif price_momentum < 0 and atr > 0:
+                direction = "SELL"
 
             print(
                 f"SIGNAL "
