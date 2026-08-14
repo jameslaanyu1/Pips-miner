@@ -5,7 +5,7 @@ from metaapi_cloud_sdk import MetaApi
 
 SYMBOL = "XAUUSD"
 LOT_SIZE = float(os.getenv("LOT_SIZE", "0.01"))
-TRAIL_PIPS = float(os.getenv("TRAIL_PIPS", "30"))
+TRAIL_PIPS = float(os.getenv("TRAIL_PIPS", "100"))
 def fmt_indicator(v):
     return f'{v:.2f}' if v is not None else 'N/A'
 
