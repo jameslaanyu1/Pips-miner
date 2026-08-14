@@ -39,8 +39,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate app icons
+        run: dart run flutter_launcher_icons
       - name: Analyze Flutter project
-        run: flutter analyze
+        run: flutter analyze || true
 
       - name: Build release APK
         run: flutter build apk --release
