@@ -187,7 +187,50 @@ async def main():
 
         while True:
 
-            tick = await connection.get_symbol_price(SYMBOL)
+            try:
+                tick = await connection.get_symbol_price(SYMBOL)
+
+            except Exception as e:
+                error_name = type(e).__name__
+                error_text = str(e)
+
+                if (
+                    "Timeout" in error_name
+                    or "timeout" in error_text.lower()
+                    or "not connected" in error_text.lower()
+                    or "socket" in error_text.lower()
+                ):
+                    print("")
+                    print(">>> METAAPI CONNECTION LOST <<<")
+                    print("ERROR:", error_name, error_text[:300])
+                    print("RECONNECTING...")
+
+                    try:
+                        await connection.close()
+                    except Exception:
+                        pass
+
+                    await asyncio.sleep(RECONNECT_DELAY)
+
+                    try:
+                        connection = account.get_rpc_connection()
+                        await connection.connect()
+                        await connection.wait_synchronized()
+
+                        print(">>> METAAPI RECONNECTED + SYNCHRONIZED <<<")
+                        print("XAUUSD ENGINE RESUMED")
+                        continue
+
+                    except Exception as reconnect_error:
+                        print(
+                            "RECONNECT FAILED:",
+                            type(reconnect_error).__name__,
+                            str(reconnect_error)[:300]
+                        )
+                        await asyncio.sleep(RECONNECT_DELAY)
+                        continue
+
+                raise
 
             now = asyncio.get_running_loop().time()
             price = mid(tick)
