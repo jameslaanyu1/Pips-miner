@@ -30,24 +30,40 @@ def normalize_volume(raw, minimum, maximum, step):
     minimum = max(float(minimum or 0.01), MIN_LOT)
     maximum = min(float(maximum or MAX_LOT), MAX_LOT)
     step = float(step or 0.01)
-    raw = float(LOT_SIZE_OVERRIDE) if LOT_SIZE_OVERRIDE else float(raw)
-    raw = max(minimum, min(raw, maximum))
+
+    raw = max(minimum, min(float(raw), maximum))
     steps = math.floor((raw - minimum + 1e-12) / step)
     return round(max(minimum, min(minimum + steps * step, maximum)), 8)
 
 
-async def get_dynamic_lot(connection, specification):
+async def get_dynamic_lot(connection, specification, price):
     info = await connection.get_account_information()
     equity = float(info.get("equity") or info.get("balance") or 0.0)
-    raw = float(LOT_SIZE_OVERRIDE) if LOT_SIZE_OVERRIDE else (equity / BALANCE_PER_001_LOT) * 0.01
+
+    if LOT_SIZE_OVERRIDE:
+        raw_lot = float(LOT_SIZE_OVERRIDE)
+    else:
+        contract_size = float(
+            specification.get("contractSize")
+            or specification.get("tradeContractSize")
+            or 100.0
+        )
+
+        price = float(price)
+        if price <= 0 or contract_size <= 0:
+            raise ValueError("Invalid XAUUSD price or contract size")
+
+        # Maximum theoretical volume supported by 1:400 leverage.
+        raw_lot = (equity * LEVERAGE) / (price * contract_size)
+
     lot = normalize_volume(
-        raw,
-        specification.get("minVolume", 0.01),
+        raw_lot,
+        specification.get("minVolume", MIN_LOT),
         specification.get("maxVolume", MAX_LOT),
         specification.get("volumeStep", 0.01)
     )
-    return lot, equity
 
+    return lot, equity
 
 async def main():
 
@@ -90,7 +106,7 @@ async def main():
             point = 10 ** (-digits)
 
         trailing_distance = TRAIL_PIPS * point
-        dynamic_lot, equity = await get_dynamic_lot(connection, specification)
+        dynamic_lot, equity = await get_dynamic_lot(connection, specification, current_price)
 
         print("RPC: CONNECTED")
         print("Symbol:", SYMBOL)
@@ -129,6 +145,7 @@ async def main():
 
             now = asyncio.get_running_loop().time()
             price = mid(tick)
+            current_price = price
 
             samples.append((now, price))
 
