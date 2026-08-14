@@ -1,5 +1,4 @@
 import os
-MARGIN_FREE_PERCENT = float(os.getenv("MARGIN_FREE_PERCENT", "50"))
 import asyncio
 import math
 from metaapi_cloud_sdk import MetaApi
@@ -18,7 +17,11 @@ MIN_EXPANSION_MOVE = float(os.getenv("MIN_EXPANSION_MOVE", "0.03"))
 COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "1.0"))
 EXECUTE_ORDERS = os.getenv("EXECUTE_ORDERS", "true").lower() == "true"
 LEVERAGE = float(os.getenv("LEVERAGE", "400"))
-RISK_PERCENT = min(float(os.getenv("RISK_PERCENT", "5")), 5.0)
+RISK_PERCENT = 1.0
+MAX_TOTAL_RISK_PERCENT = 5.0
+MAX_POSITIONS = 5
+MARGIN_FREE_PERCENT = 50.0
+
 MIN_LOT = float(os.getenv("MIN_LOT", "0.01"))
 MAX_LOT = float(os.getenv("MAX_LOT", "60"))
 RECONNECT_DELAY = float(os.getenv("RECONNECT_DELAY", "5"))
@@ -42,33 +45,57 @@ def normalize_volume(raw, minimum, maximum, step):
     return round(max(minimum, min(minimum + steps * step, maximum)), 8)
 
 
-async def get_dynamic_lot(connection, specification, price, direction="BUY"):
+async def get_dynamic_lot(
+    connection,
+    specification,
+    price,
+    direction="BUY",
+    replacing_position=False
+):
     """
-    HARD RISK POLICY
+    COMPOUNDING RISK POLICY
 
-    1. Maximum trade risk = RISK_PERCENT of balance (normally 5%).
-    2. Leverage 1:400 is NOT used to force position size.
-    3. Actual MetaApi margin is checked before execution.
-    4. New trade may use at most MARGIN_FREE_PERCENT of free margin.
-    5. Volume is always rounded DOWN to broker volumeStep.
-    6. If the minimum executable volume cannot pass the checks: NO TRADE.
+    Each NEW position:
+        Maximum risk = 1% of CURRENT account balance.
+
+    Portfolio:
+        Maximum aggregate theoretical risk = 5% of CURRENT balance.
+
+    Therefore:
+        Up to 5 x 1% positions may be open when margin permits.
+
+    Position size:
+        Recalculated from current balance for every new entry.
+
+    Leverage:
+        Never used to increase risk or force lot size.
+
+    Safety:
+        Required MetaApi margin must be <= 50% of free margin.
+        Failure of any risk/margin calculation = NO TRADE.
     """
 
     info = connection.terminal_state.account_information or {}
 
     balance = float(
-        info.get("balance") or info.get("equity") or 0.0
+        info.get("balance") or 0.0
     )
-    equity = float(info.get("equity") or balance)
-    free_margin = float(info.get("freeMargin") or 0.0)
+    equity = float(
+        info.get("equity") or balance
+    )
+    free_margin = float(
+        info.get("freeMargin") or 0.0
+    )
 
     if balance <= 0 or equity <= 0:
-        raise ValueError("Invalid account balance/equity")
+        raise ValueError(
+            "NO TRADE: invalid account balance/equity"
+        )
 
     if free_margin <= 0:
-        raise ValueError("No free margin available")
-
-    risk_budget = balance * (RISK_PERCENT / 100.0)
+        raise ValueError(
+            "NO TRADE: no free margin"
+        )
 
     pip_size = float(
         specification.get("pipSize")
@@ -82,39 +109,101 @@ async def get_dynamic_lot(connection, specification, price, direction="BUY"):
         or 100.0
     )
 
-    # Current strategy risk boundary: 100 pips.
     risk_distance = float(TRAIL_PIPS) * pip_size
 
-    # XAUUSD monetary risk per 1.00 lot.
     one_lot_loss = risk_distance * contract_size
 
     if one_lot_loss <= 0:
-        raise ValueError("Unable to calculate XAUUSD risk")
+        raise ValueError(
+            "NO TRADE: invalid XAUUSD risk calculation"
+        )
 
-    # Risk-based maximum. This is NEVER increased because of leverage.
-    risk_lot = risk_budget / one_lot_loss
+    # 1% risk for this new position.
+    position_risk_budget = (
+        balance * RISK_PERCENT / 100.0
+    )
+
+    # Maximum total theoretical risk across XAUUSD positions.
+    total_risk_budget = (
+        balance * MAX_TOTAL_RISK_PERCENT / 100.0
+    )
+
+    positions = [
+        pos for pos in connection.terminal_state.positions
+        if pos.get("symbol") == SYMBOL
+    ]
+
+    current_open_risk = 0.0
+
+    for pos in positions:
+        try:
+            volume = float(pos.get("volume") or 0.0)
+            current_open_risk += volume * one_lot_loss
+        except Exception:
+            continue
+
+    # During a reversal the existing position is about to be closed,
+    # so don't let it consume the new position's risk allowance.
+    if replacing_position:
+        current_open_risk = 0.0
+
+    remaining_total_risk = (
+        total_risk_budget - current_open_risk
+    )
+
+    if remaining_total_risk <= 0:
+        raise ValueError(
+            "NO TRADE: aggregate 5% account-risk limit reached"
+        )
+
+    risk_budget = min(
+        position_risk_budget,
+        remaining_total_risk
+    )
 
     minimum = float(
         specification.get("minVolume") or MIN_LOT
     )
+
     maximum = float(
         specification.get("maxVolume") or MAX_LOT
     )
+
     step = float(
         specification.get("volumeStep") or 0.01
     )
 
     maximum = min(maximum, MAX_LOT)
 
-    # Broker/account margin safety reserve.
-    allowed_margin = free_margin * (MARGIN_FREE_PERCENT / 100.0)
+    if step <= 0:
+        raise ValueError(
+            "NO TRADE: invalid broker volume step"
+        )
+
+    allowed_margin = (
+        free_margin *
+        (MARGIN_FREE_PERCENT / 100.0)
+    )
 
     def normalize_down(volume):
         if volume < minimum:
             return 0.0
+
         volume = min(volume, maximum)
-        steps = int(volume / step + 1e-9)
-        return round(steps * step, 8)
+
+        steps = math.floor(
+            volume / step + 1e-12
+        )
+
+        normalized = steps * step
+
+        if normalized < minimum:
+            return 0.0
+
+        return round(
+            min(normalized, maximum),
+            8
+        )
 
     async def margin_for(volume):
         order_type = (
@@ -123,57 +212,132 @@ async def get_dynamic_lot(connection, specification, price, direction="BUY"):
             else "ORDER_TYPE_SELL"
         )
 
-        result = await connection.calculate_margin(
-            symbol=SYMBOL,
-            order_type=order_type,
-            volume=volume,
-            open_price=float(price)
-        )
-
-        if isinstance(result, dict):
-            return float(
-                result.get("margin")
-                or result.get("requiredMargin")
-                or 0.0
+        try:
+            result = await connection.calculate_margin(
+                symbol=SYMBOL,
+                order_type=order_type,
+                volume=volume,
+                open_price=float(price)
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"NO TRADE: MetaApi margin check failed: {exc}"
             )
 
-        return float(getattr(result, "margin", 0.0) or 0.0)
+        if isinstance(result, dict):
+            margin = (
+                result.get("margin")
+                or result.get("requiredMargin")
+            )
+        else:
+            margin = getattr(
+                result,
+                "margin",
+                None
+            )
 
-    # Never exceed the 5% risk budget.
-    lot = normalize_down(risk_lot)
+        if margin is None:
+            raise ValueError(
+                "NO TRADE: MetaApi returned no margin value"
+            )
+
+        margin = float(margin)
+
+        if margin <= 0:
+            raise ValueError(
+                "NO TRADE: invalid MetaApi margin"
+            )
+
+        return margin
+
+    lot = normalize_down(
+        risk_budget / one_lot_loss
+    )
 
     if lot <= 0:
         raise ValueError(
-            f"NO TRADE: minimum lot exceeds {RISK_PERCENT}% risk budget"
+            "NO TRADE: 1% risk is below broker minimum lot"
         )
 
-    # Reduce lot until BOTH risk and actual margin pass.
     while lot >= minimum:
-        final_loss = lot * one_lot_loss
 
-        if final_loss > risk_budget + 1e-8:
-            lot = normalize_down(lot - step)
+        projected_risk = (
+            lot * one_lot_loss
+        )
+
+        if projected_risk > risk_budget + 1e-8:
+            lot = normalize_down(
+                lot - step
+            )
             continue
 
         required_margin = await margin_for(lot)
 
-        if required_margin > 0 and required_margin <= allowed_margin:
-            print(
-                f"RISK CHECK: balance={balance:.2f} "
-                f"risk_limit={risk_budget:.2f} "
-                f"lot={lot:.2f} "
-                f"risk={final_loss:.2f} "
-                f"margin={required_margin:.2f} "
-                f"free_margin={free_margin:.2f}"
-            )
-            return lot, equity
+        if required_margin <= allowed_margin:
 
-        lot = normalize_down(lot - step)
+            print("=== COMPOUNDING RISK CHECK PASSED ===")
+            print(
+                f"Balance: {balance:.2f}"
+            )
+            print(
+                f"Equity: {equity:.2f}"
+            )
+            print(
+                f"Position risk: {RISK_PERCENT:.2f}%"
+            )
+            print(
+                f"Position risk budget: {position_risk_budget:.2f}"
+            )
+            print(
+                f"Existing XAUUSD risk: {current_open_risk:.2f}"
+            )
+            print(
+                f"Total risk ceiling: "
+                f"{MAX_TOTAL_RISK_PERCENT:.2f}%"
+            )
+            print(
+                f"Remaining risk: {remaining_total_risk:.2f}"
+            )
+            print(
+                f"Approved lot: {lot:.2f}"
+            )
+            print(
+                f"Projected position risk: "
+                f"{projected_risk:.2f}"
+            )
+            print(
+                f"Required margin: "
+                f"{required_margin:.2f}"
+            )
+            print(
+                f"Allowed margin: "
+                f"{allowed_margin:.2f}"
+            )
+            print("========================================")
+
+            return (
+                lot,
+                balance,
+                equity,
+                risk_budget,
+                projected_risk
+            )
+
+        print(
+            f"RISK REDUCTION: lot={lot:.2f} "
+            f"margin={required_margin:.2f} "
+            f"allowed={allowed_margin:.2f}"
+        )
+
+        lot = normalize_down(
+            lot - step
+        )
 
     raise ValueError(
-        "NO TRADE: no volume satisfies both the 5% risk limit "
-        "and the available-margin safety limit"
+        "NO TRADE: no lot satisfies the 1% position-risk "
+        "and 50% free-margin limits"
     )
+
 async def main():
 
     token = os.environ["METAAPI_TOKEN"]
@@ -194,22 +358,71 @@ async def main():
         print("Region:", account.region)
         print("Connection:", account.connection_status)
 
-        if account.connection_status != "CONNECTED":
-            raise RuntimeError(
-                "MetaApi account is not connected."
-            )
-
         connection = account.get_streaming_connection()
 
-        await connection.connect()
-        await connection.wait_synchronized()
+        broker_ready = False
+        last_connection_error = None
 
-        if not connection.terminal_state.connected_to_broker:
-            raise RuntimeError("MetaTrader terminal is not connected to broker")
+        for attempt in range(1, 7):
+            try:
+                print(f">>> STREAM STARTUP ATTEMPT {attempt}/6 <<<")
+                await connection.connect()
+                await connection.wait_synchronized()
 
-        await connection.subscribe_to_market_data(
-            symbol=SYMBOL
-        )
+                if connection.terminal_state.connected_to_broker:
+                    broker_ready = True
+                    print(">>> BROKER CONNECTED + SYNCHRONIZED <<<")
+                    break
+
+                print(">>> WAITING FOR BROKER CONNECTION <<<")
+
+            except Exception as exc:
+                last_connection_error = exc
+                print(
+                    f">>> STREAM STARTUP RETRY: "
+                    f"{type(exc).__name__}: {exc} <<<"
+                )
+
+            await asyncio.sleep(10)
+
+        if not broker_ready:
+            raise RuntimeError(
+                "MetaTrader broker connection did not become ready: "
+                f"{last_connection_error}"
+            )
+
+        subscribed = False
+        last_subscription_error = None
+
+        for attempt in range(1, 7):
+            try:
+                print(
+                    f">>> MARKET-DATA SUBSCRIPTION ATTEMPT "
+                    f"{attempt}/6 <<<"
+                )
+
+                await connection.subscribe_to_market_data(
+                    symbol=SYMBOL
+                )
+
+                subscribed = True
+                print(">>> MARKET-DATA SUBSCRIBED <<<")
+                break
+
+            except Exception as exc:
+                last_subscription_error = exc
+                print(
+                    f">>> SUBSCRIPTION RETRY: "
+                    f"{type(exc).__name__}: {exc} <<<"
+                )
+
+                await asyncio.sleep(10)
+
+        if not subscribed:
+            raise RuntimeError(
+                "XAUUSD market-data subscription failed after retries: "
+                f"{last_subscription_error}"
+            )
 
         terminal_state = connection.terminal_state
 
@@ -265,7 +478,9 @@ async def main():
         print("Account balance:", round(balance, 2))
         print("Account equity:", round(equity, 2))
         print("Leverage:", f"1:{LEVERAGE:g}")
-        print("Risk limit:", f"{RISK_PERCENT:g}% =", round(risk_budget, 2))
+        print("Risk per position:", f"{RISK_PERCENT:g}% =", round(risk_budget, 2))
+        print("Maximum total open risk:", f"{MAX_TOTAL_RISK_PERCENT:g}%")
+        print("Maximum positions:", MAX_POSITIONS)
         print("Calculated lot:", dynamic_lot)
         print("100-pip calculated risk:", round(preview_loss, 2))
         print("Trailing distance:", trailing_distance)
@@ -464,7 +679,8 @@ async def main():
                             connection,
                             specification,
                             price,
-                            "SELL"
+                            "SELL",
+                            replacing_position=True
                         )
 
                         if EXECUTE_ORDERS:
@@ -521,7 +737,8 @@ async def main():
                             connection,
                             specification,
                             price,
-                            "BUY"
+                            "BUY",
+                            replacing_position=True
                         )
 
                         if EXECUTE_ORDERS:
@@ -564,11 +781,29 @@ async def main():
                 expansion_armed = True
 
             if (
-                position is None
-                and expansion
+                expansion
                 and direction
                 and expansion_armed
                 and now - last_signal_time >= COOLDOWN_SECONDS
+                and len([
+                    p for p in terminal_state.positions
+                    if p.get("symbol") == SYMBOL
+                ]) < MAX_POSITIONS
+                and (
+                    not [
+                        p for p in terminal_state.positions
+                        if p.get("symbol") == SYMBOL
+                    ]
+                    or all(
+                        (
+                            "BUY" in str(p.get("type", "")).upper()
+                            if direction == "BUY"
+                            else "SELL" in str(p.get("type", "")).upper()
+                        )
+                        for p in terminal_state.positions
+                        if p.get("symbol") == SYMBOL
+                    )
+                )
             ):
 
                 entry_price = (
