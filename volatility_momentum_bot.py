@@ -1,3 +1,40 @@
+def trading_session_allowed(specification, now):
+    sessions = specification.get("tradeSessions", {})
+    day = now.strftime("%A").upper()
+    session = sessions.get(day, [])
+
+    if not session:
+        return False
+
+    start = session[0]["from"][:8]
+    end = session[0]["to"][:8]
+
+    start_time = datetime.strptime(start, "%H:%M:%S").time()
+    end_time = datetime.strptime(end, "%H:%M:%S").time()
+
+    current = now.time()
+
+    start_seconds = (
+        start_time.hour * 3600
+        + start_time.minute * 60
+        + start_time.second
+        + 7200
+    )
+
+    end_seconds = (
+        end_time.hour * 3600
+        + end_time.minute * 60
+        + end_time.second
+        - 7200
+    )
+
+    current_seconds = (
+        current.hour * 3600
+        + current.minute * 60
+        + current.second
+    )
+
+    return start_seconds <= current_seconds <= end_seconds
 import os
 import asyncio
 import math
@@ -728,9 +765,10 @@ async def main():
                 expansion_armed = True
 
             if (
-                expansion
-                and direction
-                and expansion_armed
+    expansion
+    and direction
+    and expansion_armed
+    and trading_session_allowed(specification, now)
                 and now - last_signal_time >= COOLDOWN_SECONDS
                 and len([
                     p for p in terminal_state.positions
