@@ -1,2 +1,4 @@
 .env
 __pycache__/
+
+.reversal_manager_state.json
