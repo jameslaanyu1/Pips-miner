@@ -36,25 +36,53 @@ def normalize_volume(raw, minimum, maximum, step):
     return round(max(minimum, min(minimum + steps * step, maximum)), 8)
 
 
-async def get_dynamic_lot(connection, specification, price):
+async def get_dynamic_lot(connection, specification, price, direction):
     info = await connection.get_account_information()
-    equity = float(info.get("equity") or info.get("balance") or 0.0)
+    balance = float(info.get("balance") or info.get("equity") or 0.0)
+    equity = float(info.get("equity") or balance)
 
-    if LOT_SIZE_OVERRIDE:
-        raw_lot = float(LOT_SIZE_OVERRIDE)
+    risk_budget = balance * (RISK_PERCENT / 100.0)
+
+    pip_size = float(
+        specification.get("pipSize")
+        or specification.get("point")
+        or 0.01
+    )
+    risk_distance = TRAIL_PIPS * pip_size
+
+    if direction == "BUY":
+        stop_price = price - risk_distance
+        order_type = "ORDER_TYPE_BUY"
     else:
-        contract_size = float(
-            specification.get("contractSize")
-            or specification.get("tradeContractSize")
-            or 100.0
-        )
+        stop_price = price + risk_distance
+        order_type = "ORDER_TYPE_SELL"
 
-        price = float(price)
-        if price <= 0 or contract_size <= 0:
-            raise ValueError("Invalid XAUUSD price or contract size")
+    # Determine the monetary loss of one lot at the 100-pip risk distance.
+    one_lot_loss = abs(float(await connection.calculate_profit(
+        SYMBOL,
+        order_type,
+        1.0,
+        price,
+        stop_price
+    )))
 
-        # Maximum theoretical volume supported by 1:400 leverage.
-        raw_lot = (equity * LEVERAGE) / (price * contract_size)
+    if one_lot_loss <= 0:
+        raise ValueError("Unable to calculate XAUUSD 100-pip risk")
+
+    risk_lot = risk_budget / one_lot_loss
+
+    # Also enforce the 1:400 margin constraint.
+    contract_size = float(
+        specification.get("contractSize")
+        or specification.get("tradeContractSize")
+        or 100.0
+    )
+
+    margin_lot = (
+        equity * LEVERAGE
+    ) / (price * contract_size)
+
+    raw_lot = min(risk_lot, margin_lot)
 
     lot = normalize_volume(
         raw_lot,
@@ -63,8 +91,32 @@ async def get_dynamic_lot(connection, specification, price):
         specification.get("volumeStep", 0.01)
     )
 
-    return lot, equity
+    # Hard safety check after rounding.
+    final_loss = abs(float(await connection.calculate_profit(
+        SYMBOL,
+        order_type,
+        lot,
+        price,
+        stop_price
+    )))
 
+    if final_loss > risk_budget + 1e-9:
+        lot = normalize_volume(
+            lot - float(specification.get("volumeStep", 0.01)),
+            specification.get("minVolume", MIN_LOT),
+            specification.get("maxVolume", MAX_LOT),
+            specification.get("volumeStep", 0.01)
+        )
+
+        final_loss = abs(float(await connection.calculate_profit(
+            SYMBOL,
+            order_type,
+            lot,
+            price,
+            stop_price
+        )))
+
+    return lot, balance, equity, risk_budget, final_loss
 async def main():
 
     token = os.environ["METAAPI_TOKEN"]
@@ -106,7 +158,7 @@ async def main():
             point = 10 ** (-digits)
 
         trailing_distance = TRAIL_PIPS * point
-        dynamic_lot, equity = await get_dynamic_lot(connection, specification, current_price)
+        dynamic_lot, equity = await get_dynamic_lot(connection, specification, current_price, direction)
 
         print("RPC: CONNECTED")
         print("Symbol:", SYMBOL)
@@ -248,7 +300,7 @@ async def main():
 
                     try:
 
-                        lot, _ = await get_dynamic_lot(
+                        lot, _, _, _, _ = await get_dynamic_lot(
                             connection,
                             specification
                         )
@@ -303,7 +355,7 @@ async def main():
 
                     try:
 
-                        lot, _ = await get_dynamic_lot(
+                        lot, _, _, _, _ = await get_dynamic_lot(
                             connection,
                             specification
                         )
@@ -387,6 +439,8 @@ async def main():
 
                     print("ACCOUNT EQUITY:", round(equity, 2))
                     print("POSITION SIZE:", lot)
+                    print("RISK LIMIT:", round(risk_budget, 2))
+                    print("CALCULATED 100-PIP LOSS:", round(risk_loss, 2))
 
                     if EXECUTE_ORDERS:
 
