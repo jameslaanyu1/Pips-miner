@@ -1,6 +1,7 @@
 """
 Testing script for MetaAPI Bridge Integration
 Test all bot functionalities with real MetaAPI connection
+Gold (XAUUSD) Trading Symbol
 """
 
 import asyncio
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 class BotTester:
     """Test suite for trading bot with MetaAPI"""
 
-    def __init__(self, api_token: str, account_id: str, symbol: str = 'EURUSD'):
+    def __init__(self, api_token: str, account_id: str, symbol: str = 'XAUUSD'):
         self.bridge = MetaAPIBridge(api_token)
         self.account_id = account_id
         self.symbol = symbol
@@ -33,7 +34,7 @@ class BotTester:
         Run all test cases
         """
         logger.info("\n" + "="*80)
-        logger.info("🧪 METAAPI BRIDGE TEST SUITE")
+        logger.info("🧪 METAAPI BRIDGE TEST SUITE - XAUUSD (GOLD)")
         logger.info("="*80)
 
         try:
@@ -120,13 +121,13 @@ class BotTester:
 
     async def test_price_quotes(self):
         """
-        Test: Get Price Quotes
+        Test: Get Price Quotes for XAUUSD and other symbols
         """
         logger.info("\n💱 TEST 3: Price Quotes")
         logger.info("-" * 80)
 
         try:
-            symbols = ['EURUSD', 'GBPUSD', 'USDJPY']
+            symbols = ['XAUUSD', 'EURUSD', 'GBPUSD']
             success_count = 0
 
             for symbol in symbols:
@@ -147,7 +148,7 @@ class BotTester:
 
     async def test_candle_data(self):
         """
-        Test: Retrieve Candle Data
+        Test: Retrieve Candle Data for XAUUSD
         """
         logger.info("\n📈 TEST 4: Candle Data")
         logger.info("-" * 80)
@@ -226,7 +227,7 @@ class BotTester:
 
     async def test_indicators(self):
         """
-        Test: Indicator Calculation
+        Test: Indicator Calculation for XAUUSD
         """
         logger.info("\n📊 TEST 7: Indicator Calculation")
         logger.info("-" * 80)
@@ -240,11 +241,11 @@ class BotTester:
 
             # Calculate ATR
             atr = self._calculate_atr(candles, 14)
-            logger.info(f"ATR (14): {atr:.6f}")
+            logger.info(f"ATR (14) for {self.symbol}: {atr:.6f}")
 
             # Calculate RSI
             rsi = self._calculate_rsi(candles, 14)
-            logger.info(f"RSI (14): {rsi:.2f}")
+            logger.info(f"RSI (14) for {self.symbol}: {rsi:.2f}")
 
             logger.info("✅ PASS: Indicators calculated successfully")
             self.test_results.append(('Indicators', 'PASS'))
@@ -254,7 +255,7 @@ class BotTester:
 
     async def test_position_info(self):
         """
-        Test: Position Information
+        Test: Position Information for XAUUSD
         """
         logger.info("\n📍 TEST 8: Position Information")
         logger.info("-" * 80)
@@ -323,7 +324,7 @@ class BotTester:
         Print test summary
         """
         logger.info("\n" + "="*80)
-        logger.info("📋 TEST SUMMARY")
+        logger.info("📋 TEST SUMMARY - XAUUSD GOLD TRADING")
         logger.info("="*80)
 
         pass_count = sum(1 for _, result in self.test_results if result == 'PASS')
@@ -344,7 +345,7 @@ async def main():
     """
     api_token = os.getenv('METAAPI_TOKEN')
     account_id = os.getenv('METAAPI_ACCOUNT_ID')
-    symbol = os.getenv('TRADING_SYMBOL', 'EURUSD')
+    symbol = os.getenv('TRADING_SYMBOL', 'XAUUSD')
 
     if not api_token or not account_id:
         logger.error("\n❌ Please set the following environment variables:")
@@ -353,6 +354,7 @@ async def main():
         logger.error("\nExample .env file:")
         logger.error("   METAAPI_TOKEN=xxx")
         logger.error("   METAAPI_ACCOUNT_ID=xxx")
+        logger.error("   TRADING_SYMBOL=XAUUSD")
         return
 
     tester = BotTester(api_token, account_id, symbol)
