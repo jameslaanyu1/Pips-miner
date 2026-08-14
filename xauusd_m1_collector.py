@@ -82,13 +82,8 @@ async def collect():
                 print("Building M1 candles locally from live ticks.\n")
 
                 while True:
-                    tick = await asyncio.wait_for(
-                        connection.get_tick(
-                            SYMBOL,
-                            keep_subscription=True
-                        ),
-                        timeout=TICK_TIMEOUT
-                    )
+                    tick = dict(await connection.get_symbol_price(SYMBOL))
+                    tick["time"] = datetime.now(timezone.utc)
 
                     tick_time = tick["time"]
                     key = minute_key(tick_time)

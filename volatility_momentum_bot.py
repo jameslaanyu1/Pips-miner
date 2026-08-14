@@ -16,6 +16,10 @@ EXPANSION_MULTIPLIER = float(os.getenv("EXPANSION_MULTIPLIER", "1.20"))
 MIN_EXPANSION_MOVE = float(os.getenv("MIN_EXPANSION_MOVE", "0.03"))
 COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "1.0"))
 EXECUTE_ORDERS = os.getenv("EXECUTE_ORDERS", "true").lower() == "true"
+LEVERAGE = float(os.getenv("LEVERAGE", "400"))
+RISK_PERCENT = min(float(os.getenv("RISK_PERCENT", "5")), 5.0)
+MIN_LOT = float(os.getenv("MIN_LOT", "0.01"))
+MAX_LOT = float(os.getenv("MAX_LOT", "60"))
 
 
 def mid(tick):
@@ -158,12 +162,25 @@ async def main():
             point = 10 ** (-digits)
 
         trailing_distance = TRAIL_PIPS * point
-        dynamic_lot, equity = await get_dynamic_lot(connection, specification, current_price, direction)
 
-        print("RPC: CONNECTED")
+        preview_quote = await connection.get_symbol_price(SYMBOL)
+        preview_price = mid(preview_quote)
+        preview_direction = "BUY"
+        dynamic_lot, balance, equity, risk_budget, preview_loss = await get_dynamic_lot(
+            connection,
+            specification,
+            preview_price,
+            preview_direction
+        )
+
+        print("RPC: CONNECTED + SYNCHRONIZED")
         print("Symbol:", SYMBOL)
+        print("Account balance:", round(balance, 2))
         print("Account equity:", round(equity, 2))
+        print("Leverage:", f"1:{LEVERAGE:g}")
+        print("Risk limit:", f"{RISK_PERCENT:g}% =", round(risk_budget, 2))
         print("Calculated lot:", dynamic_lot)
+        print("100-pip calculated risk:", round(preview_loss, 2))
         print("Trailing distance:", trailing_distance)
         print("")
         print("RULES:")
@@ -190,10 +207,7 @@ async def main():
 
         while True:
 
-            tick = await connection.get_tick(
-                SYMBOL,
-                keep_subscription=True
-            )
+            tick = await connection.get_symbol_price(SYMBOL)
 
             now = asyncio.get_running_loop().time()
             price = mid(tick)
@@ -302,7 +316,9 @@ async def main():
 
                         lot, _, _, _, _ = await get_dynamic_lot(
                             connection,
-                            specification
+                            specification,
+                            price,
+                            "SELL"
                         )
 
                         if EXECUTE_ORDERS:
@@ -357,7 +373,9 @@ async def main():
 
                         lot, _, _, _, _ = await get_dynamic_lot(
                             connection,
-                            specification
+                            specification,
+                            price,
+                            "BUY"
                         )
 
                         if EXECUTE_ORDERS:
@@ -432,12 +450,16 @@ async def main():
 
                 try:
 
-                    lot, equity = await get_dynamic_lot(
+                    lot, balance, equity, risk_budget, risk_loss = await get_dynamic_lot(
                         connection,
-                        specification
+                        specification,
+                        entry_price,
+                        direction
                     )
 
+                    print("ACCOUNT BALANCE:", round(balance, 2))
                     print("ACCOUNT EQUITY:", round(equity, 2))
+                    print("LEVERAGE:", f"1:{LEVERAGE:g}")
                     print("POSITION SIZE:", lot)
                     print("RISK LIMIT:", round(risk_budget, 2))
                     print("CALCULATED 100-PIP LOSS:", round(risk_loss, 2))
