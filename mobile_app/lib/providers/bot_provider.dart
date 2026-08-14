@@ -4,33 +4,25 @@ import 'dart:convert';
 import 'dart:async';
 
 class BotProvider extends ChangeNotifier {
-  // Account settings
   bool _isLiveAccount = false;
-  String? _apiToken;
-  String? _demoAccountId;
-  String? _liveAccountId;
-  String? _symbol = 'EURUSD';
+  String? _symbol = 'XAUUSD';
   double? _volume = 0.01;
 
-  // Bot status
   bool _isBotRunning = false;
   bool _isConnected = false;
   String? _currentPosition;
   double? _entryPrice;
   double? _stopPrice;
 
-  // Trading metrics
   int _totalTrades = 0;
   double _winRate = 0.0;
   double _profitLoss = 0.0;
   double _balance = 10000.0;
   double _priceChange = 0.0;
 
-  // WebSocket
   late String _apiUrl;
   Timer? _updateTimer;
 
-  // Getters
   bool get isLiveAccount => _isLiveAccount;
   bool get isBotRunning => _isBotRunning;
   bool get isConnected => _isConnected;
@@ -45,129 +37,175 @@ class BotProvider extends ChangeNotifier {
   String? get symbol => _symbol;
   double? get volume => _volume;
 
+  String get accountMode => _isLiveAccount ? 'LIVE' : 'DEMO';
+
   BotProvider() {
-    _apiUrl = 'http://localhost:5000/api';
+    // Android emulator -> host computer
+    // Change to your computer's LAN IP for a physical Android phone.
+    _apiUrl = 'http://10.0.2.2:5000/api';
   }
 
-  // Set account mode (Demo/Live)
   void setAccountMode(bool isLive) {
+    if (_isBotRunning) return;
+
     _isLiveAccount = isLive;
     notifyListeners();
   }
 
-  // Update settings
   void updateSettings({
-    required String apiToken,
-    required String demoAccountId,
-    required String liveAccountId,
-    required String symbol,
-    required double volume,
+    String? symbol,
+    double? volume,
   }) {
-    _apiToken = apiToken;
-    _demoAccountId = demoAccountId;
-    _liveAccountId = liveAccountId;
-    _symbol = symbol;
-    _volume = volume;
+    if (symbol != null && symbol.trim().isNotEmpty) {
+      _symbol = symbol.toUpperCase();
+    }
+
+    if (volume != null && volume > 0) {
+      _volume = volume;
+    }
+
     notifyListeners();
   }
 
-  // Connect to backend
   Future<void> connect() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_apiUrl/health'),
-      );
+      final response = await http
+          .get(Uri.parse('$_apiUrl/health'))
+          .timeout(const Duration(seconds: 5));
+
       if (response.statusCode == 200) {
         _isConnected = true;
+
+        final data = jsonDecode(response.body);
+
+        if (data['mode'] == 'LIVE') {
+          _isLiveAccount = true;
+        } else {
+          _isLiveAccount = false;
+        }
+
+        if (data['symbol'] != null) {
+          _symbol = data['symbol'];
+        }
+
+        _isBotRunning = data['bot_running'] == true;
+
+        notifyListeners();
+      } else {
+        _isConnected = false;
         notifyListeners();
       }
     } catch (e) {
       _isConnected = false;
-      print('Connection error: $e');
+      debugPrint('Connection error: $e');
+      notifyListeners();
     }
   }
 
-  // Start bot
   Future<void> startBot() async {
     try {
-      final accountId =
-          _isLiveAccount ? _liveAccountId : _demoAccountId;
-
-      if (accountId == null || _apiToken == null) {
-        throw Exception('Account credentials not configured');
+      if (!_isConnected) {
+        await connect();
       }
 
-      // Configure bot
-      final configResponse = await http.post(
-        Uri.parse('$_apiUrl/config'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'account_id': accountId,
-          'api_token': _apiToken,
-          'symbol': _symbol,
-        }),
-      );
+      if (!_isConnected) {
+        throw Exception('Backend is not connected');
+      }
+
+      final configResponse = await http
+          .post(
+            Uri.parse('$_apiUrl/config'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'mode': accountMode,
+              'symbol': _symbol,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (configResponse.statusCode != 200) {
-        throw Exception('Failed to configure bot');
+        final data = jsonDecode(configResponse.body);
+        throw Exception(data['error'] ?? 'Failed to configure bot');
       }
 
-      // Start bot
-      final startResponse = await http.post(
-        Uri.parse('$_apiUrl/bot/start'),
-      );
+      final startResponse = await http
+          .post(Uri.parse('$_apiUrl/bot/start'))
+          .timeout(const Duration(seconds: 10));
 
-      if (startResponse.statusCode == 200) {
-        _isBotRunning = true;
-        _startUpdates();
-        notifyListeners();
+      if (startResponse.statusCode != 200) {
+        final data = jsonDecode(startResponse.body);
+        throw Exception(data['error'] ?? 'Failed to start bot');
       }
+
+      _isBotRunning = true;
+      _startUpdates();
+      notifyListeners();
     } catch (e) {
-      print('Error starting bot: $e');
+      debugPrint('Error starting bot: $e');
+      rethrow;
     }
   }
 
-  // Stop bot
   Future<void> stopBot() async {
     try {
-      final response = await http.post(
-        Uri.parse('$_apiUrl/bot/stop'),
-      );
+      final response = await http
+          .post(Uri.parse('$_apiUrl/bot/stop'))
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         _isBotRunning = false;
         _updateTimer?.cancel();
         notifyListeners();
+      } else {
+        final data = jsonDecode(response.body);
+        throw Exception(data['error'] ?? 'Failed to stop bot');
       }
     } catch (e) {
-      print('Error stopping bot: $e');
+      debugPrint('Error stopping bot: $e');
+      rethrow;
     }
   }
 
-  // Start periodic updates
   void _startUpdates() {
-    _updateTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      await _fetchBotStatus();
-    });
+    _updateTimer?.cancel();
+
+    _updateTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) async {
+        await _fetchBotStatus();
+      },
+    );
   }
 
-  // Fetch bot status
   Future<void> _fetchBotStatus() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_apiUrl/bot/status'),
-      );
+      final response = await http
+          .get(Uri.parse('$_apiUrl/bot/status'))
+          .timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+
+        _isBotRunning = data['running'] == true;
         _currentPosition = data['position'];
         _entryPrice = data['entry_price']?.toDouble();
         _stopPrice = data['stop_price']?.toDouble();
         _totalTrades = data['trade_count'] ?? 0;
+
+        if (data['mode'] == 'LIVE') {
+          _isLiveAccount = true;
+        } else {
+          _isLiveAccount = false;
+        }
+
+        if (data['symbol'] != null) {
+          _symbol = data['symbol'];
+        }
+
         notifyListeners();
       }
     } catch (e) {
-      print('Error fetching status: $e');
+      debugPrint('Error fetching status: $e');
     }
   }
 
