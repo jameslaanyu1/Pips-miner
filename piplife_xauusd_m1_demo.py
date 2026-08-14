@@ -6,6 +6,7 @@ SYMBOL = "XAUUSD"
 LOT_SIZE = float(os.getenv("LOT_SIZE", "0.01"))
 TRAIL_PIPS = float(os.getenv("TRAIL_PIPS", "50"))
 DEMO_ONLY = os.getenv("DEMO_ONLY", "true").lower() == "true"
+POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1.0"))
 
 
 def mid(tick):
@@ -236,7 +237,7 @@ async def main():
                 print("ORDER SENT: NO")
                 print("")
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(POLL_SECONDS)
 
     finally:
 
