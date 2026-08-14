@@ -52,36 +52,26 @@ async def get_dynamic_lot(connection, specification, price, direction):
         or specification.get("point")
         or 0.01
     )
+
     risk_distance = TRAIL_PIPS * pip_size
 
-    if direction == "BUY":
-        stop_price = price - risk_distance
-        order_type = "ORDER_TYPE_BUY"
-    else:
-        stop_price = price + risk_distance
-        order_type = "ORDER_TYPE_SELL"
-
-    # Determine the monetary loss of one lot at the 100-pip risk distance.
-    one_lot_loss = abs(float(await connection.calculate_profit(
-        SYMBOL,
-        order_type,
-        1.0,
-        price,
-        stop_price
-    )))
-
-    if one_lot_loss <= 0:
-        raise ValueError("Unable to calculate XAUUSD 100-pip risk")
-
-    risk_lot = risk_budget / one_lot_loss
-
-    # Also enforce the 1:400 margin constraint.
     contract_size = float(
         specification.get("contractSize")
         or specification.get("tradeContractSize")
         or 100.0
     )
 
+    # XAUUSD monetary risk per lot:
+    # price distance × contract size.
+    one_lot_loss = abs(risk_distance * contract_size)
+
+    if one_lot_loss <= 0:
+        raise ValueError("Unable to calculate XAUUSD risk")
+
+    # Maximum lot size allowed by the 5% risk budget.
+    risk_lot = risk_budget / one_lot_loss
+
+    # Maximum lot size allowed by 1:400 leverage.
     margin_lot = (
         equity * LEVERAGE
     ) / (price * contract_size)
@@ -95,32 +85,22 @@ async def get_dynamic_lot(connection, specification, price, direction):
         specification.get("volumeStep", 0.01)
     )
 
-    # Hard safety check after rounding.
-    final_loss = abs(float(await connection.calculate_profit(
-        SYMBOL,
-        order_type,
-        lot,
-        price,
-        stop_price
-    )))
+    # Never exceed the 5% risk budget after volume rounding.
+    final_loss = lot * one_lot_loss
 
     if final_loss > risk_budget + 1e-9:
+        step = float(specification.get("volumeStep", 0.01))
         lot = normalize_volume(
-            lot - float(specification.get("volumeStep", 0.01)),
+            lot - step,
             specification.get("minVolume", MIN_LOT),
             specification.get("maxVolume", MAX_LOT),
-            specification.get("volumeStep", 0.01)
+            step
         )
-
-        final_loss = abs(float(await connection.calculate_profit(
-            SYMBOL,
-            order_type,
-            lot,
-            price,
-            stop_price
-        )))
+        final_loss = lot * one_lot_loss
 
     return lot, balance, equity, risk_budget, final_loss
+
+
 async def main():
 
     token = os.environ["METAAPI_TOKEN"]
