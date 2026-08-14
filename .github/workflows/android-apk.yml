@@ -34,7 +34,8 @@ jobs:
 
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner_app .
-
+      - name: Remove generated test
+        run: rm -f test/widget_test.dart
       - name: Install dependencies
         run: flutter pub get
 

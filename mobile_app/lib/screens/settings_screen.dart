@@ -88,7 +88,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     ),
                                     child: Column(
                                       children: [
-                                        const Icon(Icons.sandbox, size: 28),
+                                        const Icon(Icons.science, size: 28),
                                         const SizedBox(height: 4),
                                         Text(
                                           'DEMO',

@@ -56,5 +56,13 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   build_runner: ^2.4.0
   hive_generator: ^2.0.0
+  flutter_launcher_icons: ^0.14.4
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/piplife_icon.png
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: assets/piplife_icon.png
