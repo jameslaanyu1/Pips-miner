@@ -261,19 +261,59 @@ async def get_dynamic_lot(
             "NO TRADE: 1% risk is below broker minimum lot"
         )
 
-    while lot >= minimum:
+    # Find the largest lot satisfying BOTH:
+    #   1. 1% position-risk limit
+    #   2. 50% free-margin safety limit
+    #
+    # Use binary search instead of reducing by 0.01 lots repeatedly.
+    # This dramatically reduces MetaApi margin requests.
+
+    low = minimum
+    high = lot
+    best_lot = 0.0
+    best_margin = None
+
+    while low <= high + step / 2:
+        candidate = normalize_down(
+            (low + high) / 2
+        )
+
+        if candidate < minimum:
+            break
 
         projected_risk = (
-            lot * one_lot_loss
+            candidate * one_lot_loss
         )
 
         if projected_risk > risk_budget + 1e-8:
-            lot = normalize_down(
-                lot - step
+            high = normalize_down(
+                candidate - step
             )
             continue
 
-        required_margin = await margin_for(lot)
+        required_margin = await margin_for(candidate)
+
+        if required_margin <= allowed_margin:
+            best_lot = candidate
+            best_margin = required_margin
+            low = normalize_down(
+                candidate + step
+            )
+        else:
+            print(
+                f"RISK REDUCTION: lot={candidate:.2f} "
+                f"margin={required_margin:.2f} "
+                f"allowed={allowed_margin:.2f}"
+            )
+            high = normalize_down(
+                candidate - step
+            )
+
+    if best_lot >= minimum:
+
+        lot = best_lot
+        required_margin = best_margin
+        projected_risk = lot * one_lot_loss
 
         if required_margin <= allowed_margin:
 
@@ -656,121 +696,26 @@ async def main():
                 f"EXPANSION={'YES' if expansion else 'NO'}"
             )
 
-            if position == "BUY":
-
-                candidate = price - trailing_distance
-
-                if reversal_level is None:
-                    reversal_level = entry_price - trailing_distance
-
-                reversal_level = max(
-                    reversal_level,
-                    candidate
-                )
-
-                if price <= reversal_level:
-
-                    print(
-                        f"REVERSAL BUY -> SELL "
-                        f"@ {price:.{digits}f}"
-                    )
-
-                    try:
-
-                        lot, _, _, _, _ = await get_dynamic_lot(
-                            connection,
-                            specification,
-                            price,
-                            "SELL",
-                            replacing_position=True
-                        )
-
-                        if EXECUTE_ORDERS:
-
-                            positions = list(terminal_state.positions)
-
-                            for pos in positions:
-                                if pos.get("symbol") == SYMBOL:
-                                    await connection.close_position(
-                                        pos["id"]
-                                    )
-
-                            await connection.create_market_sell_order(
-                                SYMBOL,
-                                lot
-                            )
-
-                        position = "SELL"
-                        entry_price = price
-                        reversal_level = (
-                            price + trailing_distance
-                        )
-                        expansion_armed = False
-
-                    except Exception as e:
-                        print(
-                            "REVERSAL ERROR:",
-                            type(e).__name__,
-                            str(e)
-                        )
-
-            elif position == "SELL":
-
-                candidate = price + trailing_distance
-
-                if reversal_level is None:
-                    reversal_level = entry_price + trailing_distance
-
-                reversal_level = min(
-                    reversal_level,
-                    candidate
-                )
-
-                if price >= reversal_level:
-
-                    print(
-                        f"REVERSAL SELL -> BUY "
-                        f"@ {price:.{digits}f}"
-                    )
-
-                    try:
-
-                        lot, _, _, _, _ = await get_dynamic_lot(
-                            connection,
-                            specification,
-                            price,
-                            "BUY",
-                            replacing_position=True
-                        )
-
-                        if EXECUTE_ORDERS:
-
-                            positions = list(terminal_state.positions)
-
-                            for pos in positions:
-                                if pos.get("symbol") == SYMBOL:
-                                    await connection.close_position(
-                                        pos["id"]
-                                    )
-
-                            await connection.create_market_buy_order(
-                                SYMBOL,
-                                lot
-                            )
-
-                        position = "BUY"
-                        entry_price = price
-                        reversal_level = (
-                            price - trailing_distance
-                        )
-                        expansion_armed = False
-
-                    except Exception as e:
-                        print(
-                            "REVERSAL ERROR:",
-                            type(e).__name__,
-                            str(e)
-                        )
+            # =====================================================
+            # EXIT MANAGEMENT IS OWNED BY broker_reversal_manager.py
+            # =====================================================
+            #
+            # This velocity bot does NOT reverse positions itself.
+            #
+            # Entry remains:
+            #     FAST VELOCITY EXPANSION
+            #
+            # Exit is handled externally by the broker state machine:
+            #     BUY  -> SELL STOP = current BID - trailing distance
+            #     SELL -> BUY STOP  = current ASK + trailing distance
+            #
+            # The opposite stop trails favorable price movement.
+            # When triggered:
+            #     1. old parent is closed;
+            #     2. triggered position becomes the new running position;
+            #     3. the new position receives its own opposite stop.
+            #
+            # =====================================================
 
             if (
                 not expansion

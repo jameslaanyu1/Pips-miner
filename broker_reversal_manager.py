@@ -731,6 +731,8 @@ async def reconcile(connection, state):
 
 
 async def main():
+    state = load_state()
+
     api = MetaApi(TOKEN)
 
     account = await (
