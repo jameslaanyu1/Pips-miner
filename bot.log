@@ -1,0 +1,45 @@
+nohup: ignoring input
+========================================
+ PIP-LIFE XAUUSD M1 DEMO ENGINE
+========================================
+Account: James 
+Server: HFMarketsKE-Demo2
+Region: london
+Connection: CONNECTED
+[2026-08-14T17:04:30.645507] [INFO] Connecting MetaApi websocket client to the MetaApi server via https://mt-client-api-pwpm4hvay8s8dr48.london-a.agiliumtrade.ai dedicated server. Please note that it can take up to 3 minutes for your dedicated server to start for the first time. During this time it is OK if you see some connection errors.  
+[2026-08-14T17:04:30.652113] [INFO] Connecting MetaApi websocket client to the MetaApi server via https://mt-client-api-pwpm4hvay8s8dr48.london-b.agiliumtrade.ai dedicated server.  
+[2026-08-14T17:04:31.899936] [INFO] london:0: MetaApi websocket client connected to the MetaApi server  
+[2026-08-14T17:04:32.346232] [INFO] london:1: MetaApi websocket client connected to the MetaApi server  
+RPC: CONNECTED
+Symbol: XAUUSD
+Lot: 0.01
+Trailing distance: 0.5
+
+RULES:
+NO FIXED STOP LOSS
+NO FIXED TAKE PROFIT
+OPPOSITE STOP = STOP LOSS + TAKE PROFIT
+OPPOSITE STOP ALWAYS TRAILS
+DEMO SAFETY MODE: NO ORDERS SENT
+========================================
+M1 2026-08-14 14:04:00+00:00 O:4391.48 H:4392.35 L:4391.48 C:4391.59
+M1 2026-08-14 14:05:00+00:00 O:4391.03 H:4391.45 L:4390.59 C:4391.04
+packet queue is empty, aborting
+packet queue is empty, aborting
+Traceback (most recent call last):
+  File "/data/data/com.termux/files/home/Pips-miner/piplife_xauusd_m1_demo.py", line 255, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/data/data/com.termux/files/usr/lib/python3.13/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/data/data/com.termux/files/usr/lib/python3.13/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/data/data/com.termux/files/usr/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/data/data/com.termux/files/home/Pips-miner/piplife_xauusd_m1_demo.py", line 205, in main
+    f"RSI={momentum:.2f} "
+          ^^^^^^^^^^^^^^
+TypeError: unsupported format string passed to NoneType.__format__

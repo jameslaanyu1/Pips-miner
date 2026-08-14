@@ -1,381 +1,389 @@
-"""
-Volatility + Momentum 1-Minute Trading Bot
+import os
+import asyncio
+from metaapi_cloud_sdk import MetaApi
 
-This bot implements a directional trading strategy based on volatility and momentum indicators.
-It enters positions based on direction bias and trails stop orders 50 pips behind.
-When the stop order is triggered, it closes the current position, opens an opposite position,
-and creates a new stop order 50 pips behind the new position.
-"""
+SYMBOL = "XAUUSD"
+LOT_SIZE = float(os.getenv("LOT_SIZE", "0.01"))
+TRAIL_PIPS = float(os.getenv("TRAIL_PIPS", "50"))
+def fmt_indicator(v):
+    return f'{v:.2f}' if v is not None else 'N/A'
 
-import ccxt
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-import time
-import logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+POLL_SECONDS = float(os.getenv("POLL_SECONDS", "1.0"))
+VELOCITY_WINDOW = float(os.getenv("VELOCITY_WINDOW", "5"))
+BASELINE_WINDOW = float(os.getenv("BASELINE_WINDOW", "30"))
+EXPANSION_MULTIPLIER = float(os.getenv("EXPANSION_MULTIPLIER", "2.0"))
+MIN_EXPANSION_MOVE = float(os.getenv("MIN_EXPANSION_MOVE", "0.10"))
+COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "5"))
+EXECUTE_ORDERS = os.getenv("EXECUTE_ORDERS", "true").lower() == "true"
 
 
-class VolatilityMomentumBot:
-    """1-minute trading bot using volatility and momentum indicators"""
-    
-    def __init__(self, exchange_id='binance', symbol='BTC/USDT', timeframe='1m', api_key='', api_secret=''):
-        """
-        Initialize the bot
-        
-        Args:
-            exchange_id: CCXT exchange ID
-            symbol: Trading pair symbol
-            timeframe: Candle timeframe
-            api_key: Exchange API key
-            api_secret: Exchange API secret
-        """
-        self.exchange = getattr(ccxt, exchange_id)({
-            'apiKey': api_key,
-            'secret': api_secret,
-            'enableRateLimit': True
-        })
-        self.symbol = symbol
-        self.timeframe = timeframe
-        self.position = None  # 'long', 'short', or None
-        self.entry_price = None
-        self.stop_order_id = None
-        self.stop_price = None
-        self.pip_value = self.calculate_pip_value()
-        self.last_candle_time = None
-        self.trade_count = 0
-        
-    def calculate_pip_value(self):
-        """Calculate the value of 1 pip (0.0001) for the trading pair"""
-        return 0.0001
-    
-    def fetch_ohlcv(self, limit=50):
-        """
-        Fetch OHLCV data from exchange
-        
-        Args:
-            limit: Number of candles to fetch
-            
-        Returns:
-            pandas DataFrame with OHLCV data
-        """
-        try:
-            ohlcv = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=limit)
-            df = pd.DataFrame(
-                ohlcv,
-                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-            )
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            return df
-        except Exception as e:
-            logger.error(f"Error fetching OHLCV data: {e}")
-            return None
-    
-    def calculate_volatility(self, df, period=14):
-        """
-        Calculate volatility using ATR (Average True Range)
-        
-        Args:
-            df: DataFrame with OHLCV data
-            period: Period for ATR calculation
-            
-        Returns:
-            Current ATR value
-        """
-        df['tr'] = np.maximum(
-            df['high'] - df['low'],
-            np.maximum(
-                abs(df['high'] - df['close'].shift(1)),
-                abs(df['low'] - df['close'].shift(1))
-            )
+def mid(tick):
+    return (tick["bid"] + tick["ask"]) / 2
+
+
+def minute(tick):
+    return tick["time"].replace(second=0, microsecond=0)
+
+
+async def main():
+
+    token = os.environ["METAAPI_TOKEN"]
+    account_id = os.environ["METAAPI_ACCOUNT_ID"]
+
+    api = MetaApi(token)
+
+    try:
+        account = await api.metatrader_account_api.get_account(
+            account_id
         )
-        df['atr'] = df['tr'].rolling(window=period).mean()
-        return df['atr'].iloc[-1]
-    
-    def calculate_momentum(self, df, period=14):
-        """
-        Calculate momentum using RSI (Relative Strength Index)
-        
-        Args:
-            df: DataFrame with OHLCV data
-            period: Period for RSI calculation
-            
-        Returns:
-            Current RSI value (0-100)
-        """
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.iloc[-1]
-    
-    def calculate_direction_bias(self, df, volatility, momentum):
-        """
-        Determine direction bias based on volatility and momentum
-        
-        Args:
-            df: DataFrame with OHLCV data
-            volatility: ATR value
-            momentum: RSI value
-            
-        Returns:
-            'long', 'short', or None
-        """
-        current_price = df['close'].iloc[-1]
-        previous_price = df['close'].iloc[-2]
-        
-        # Price trend
-        price_momentum = 'up' if current_price > previous_price else 'down'
-        
-        # RSI-based momentum confirmation
-        # RSI > 50: Bullish, RSI < 50: Bearish
-        momentum_direction = 'bullish' if momentum > 50 else 'bearish'
-        
-        # High volatility + bullish momentum = Long bias
-        if price_momentum == 'up' and momentum_direction == 'bullish' and volatility > 0:
-            logger.info(f"📈 Bullish bias detected - Price UP, RSI: {momentum:.2f}, ATR: {volatility:.6f}")
-            return 'long'
-        
-        # High volatility + bearish momentum = Short bias
-        elif price_momentum == 'down' and momentum_direction == 'bearish' and volatility > 0:
-            logger.info(f"📉 Bearish bias detected - Price DOWN, RSI: {momentum:.2f}, ATR: {volatility:.6f}")
-            return 'short'
-        
-        return None
-    
-    def enter_position(self, direction, current_price):
-        """
-        Enter a trading position
-        
-        Args:
-            direction: 'long' or 'short'
-            current_price: Current market price
-        """
-        try:
-            amount = 0.01  # Trade amount (adjust based on your risk)
-            
-            if direction == 'long':
-                # Buy order
-                order = self.exchange.create_market_buy_order(self.symbol, amount)
-                self.position = 'long'
-                self.entry_price = current_price
-                logger.info(f"✅ LONG position entered at {current_price}")
-            
-            elif direction == 'short':
-                # Sell order
-                order = self.exchange.create_market_sell_order(self.symbol, amount)
-                self.position = 'short'
-                self.entry_price = current_price
-                logger.info(f"✅ SHORT position entered at {current_price}")
-            
-            # Create trailing stop order
-            self.create_trailing_stop(direction, current_price)
-            
-        except Exception as e:
-            logger.error(f"Error entering position: {e}")
-    
-    def create_trailing_stop(self, position_direction, entry_price):
-        """
-        Create a trailing stop order 50 pips behind entry
-        
-        Args:
-            position_direction: 'long' or 'short'
-            entry_price: Entry price of the position
-        """
-        try:
-            stop_distance = 50 * self.pip_value
-            
-            if position_direction == 'long':
-                # For long position, stop is below entry (sell stop)
-                self.stop_price = entry_price - stop_distance
-                order = self.exchange.create_order(
-                    self.symbol,
-                    'limit',
-                    'sell',
-                    0.01,
-                    self.stop_price
+
+        print("========================================")
+        print(" PIPS-MINER XAUUSD M1 VELOCITY ENGINE")
+        print("========================================")
+        print("Account:", account.name)
+        print("Server:", account.server)
+        print("Region:", account.region)
+        print("Connection:", account.connection_status)
+
+        if account.connection_status != "CONNECTED":
+            raise RuntimeError(
+                "MetaApi account is not connected."
+            )
+
+        connection = account.get_rpc_connection()
+
+        await connection.connect()
+        await connection.wait_synchronized()
+
+        specification = await connection.get_symbol_specification(
+            SYMBOL
+        )
+
+        digits = specification.get("digits", 2)
+        point = specification.get("point")
+
+        if not point:
+            point = 10 ** (-digits)
+
+        trailing_distance = TRAIL_PIPS * point
+
+        print("RPC: CONNECTED")
+        print("Symbol:", SYMBOL)
+        print("Lot:", LOT_SIZE)
+        print("Trailing distance:", trailing_distance)
+        print("")
+        print("RULES:")
+        print("NO FIXED STOP LOSS")
+        print("NO FIXED TAKE PROFIT")
+        print("OPPOSITE STOP = STOP LOSS + TAKE PROFIT")
+        print("OPPOSITE STOP ALWAYS TRAILS")
+        print("RSI: NOT USED")
+        print("MOMENTUM: NOT USED")
+        print("ENTRY: IMMEDIATE VELOCITY EXPANSION")
+        print("ORDERS ENABLED:", EXECUTE_ORDERS)
+        print("========================================")
+
+        from collections import deque
+        samples = deque(maxlen=240)
+
+        position = None
+        entry_price = None
+        reversal_level = None
+        last_signal_time = 0.0
+        expansion_armed = True
+
+        while True:
+
+            tick = await connection.get_tick(
+                SYMBOL,
+                keep_subscription=True
+            )
+
+            now = asyncio.get_running_loop().time()
+            price = mid(tick)
+
+            samples.append((now, price))
+
+            cutoff = now - BASELINE_WINDOW
+
+            while samples and samples[0][0] < cutoff:
+                samples.popleft()
+
+            if len(samples) < 3:
+                await asyncio.sleep(POLL_SECONDS)
+                continue
+
+            window_start = now - VELOCITY_WINDOW
+            anchor = samples[0]
+
+            for sample in samples:
+                if sample[0] >= window_start:
+                    anchor = sample
+                    break
+
+            elapsed = now - anchor[0]
+
+            if elapsed <= 0:
+                await asyncio.sleep(POLL_SECONDS)
+                continue
+
+            move = price - anchor[1]
+            velocity = move / elapsed
+            abs_velocity = abs(velocity)
+
+            velocities = []
+
+            previous_t, previous_p = samples[0]
+
+            for t, p_now in list(samples)[1:]:
+
+                dt = t - previous_t
+
+                if dt > 0:
+
+                    age = now - t
+
+                    if VELOCITY_WINDOW < age <= BASELINE_WINDOW:
+                        velocities.append(
+                            abs((p_now - previous_p) / dt)
+                        )
+
+                previous_t = t
+                previous_p = p_now
+
+            baseline = (
+                sum(velocities) / len(velocities)
+                if velocities else 0.0
+            )
+
+            expansion = (
+                baseline > 0
+                and abs_velocity >= baseline * EXPANSION_MULTIPLIER
+                and abs(move) >= MIN_EXPANSION_MOVE
+            )
+
+            direction = (
+                "BUY"
+                if velocity > 0
+                else "SELL"
+                if velocity < 0
+                else None
+            )
+
+            print(
+                f"VELOCITY "
+                f"PRICE={price:.{digits}f} "
+                f"MOVE={move:.{digits}f} "
+                f"V={velocity:.{digits+2}f}/s "
+                f"BASE={baseline:.{digits+2}f}/s "
+                f"EXPANSION={'YES' if expansion else 'NO'}"
+            )
+
+            if position == "BUY":
+
+                candidate = price - trailing_distance
+
+                if reversal_level is None:
+                    reversal_level = entry_price - trailing_distance
+
+                reversal_level = max(
+                    reversal_level,
+                    candidate
                 )
-                self.stop_order_id = order['id']
-                logger.info(f"🛑 Long position - Stop order created at {self.stop_price}")
-            
-            elif position_direction == 'short':
-                # For short position, stop is above entry (buy stop)
-                self.stop_price = entry_price + stop_distance
-                order = self.exchange.create_order(
-                    self.symbol,
-                    'limit',
-                    'buy',
-                    0.01,
-                    self.stop_price
+
+                if price <= reversal_level:
+
+                    print(
+                        f"REVERSAL BUY -> SELL "
+                        f"@ {price:.{digits}f}"
+                    )
+
+                    try:
+
+                        if EXECUTE_ORDERS:
+
+                            positions = await connection.get_positions()
+
+                            for pos in positions:
+                                if pos.get("symbol") == SYMBOL:
+                                    await connection.close_position(
+                                        pos["id"]
+                                    )
+
+                            await connection.create_market_sell_order(
+                                SYMBOL,
+                                LOT_SIZE
+                            )
+
+                        position = "SELL"
+                        entry_price = price
+                        reversal_level = (
+                            price + trailing_distance
+                        )
+                        expansion_armed = False
+
+                    except Exception as e:
+                        print(
+                            "REVERSAL ERROR:",
+                            type(e).__name__,
+                            str(e)
+                        )
+
+            elif position == "SELL":
+
+                candidate = price + trailing_distance
+
+                if reversal_level is None:
+                    reversal_level = entry_price + trailing_distance
+
+                reversal_level = min(
+                    reversal_level,
+                    candidate
                 )
-                self.stop_order_id = order['id']
-                logger.info(f"🛑 Short position - Stop order created at {self.stop_price}")
-        
-        except Exception as e:
-            logger.error(f"Error creating trailing stop: {e}")
-    
-    def check_stop_triggered(self, current_price):
-        """
-        Check if the stop order has been triggered
-        
-        Args:
-            current_price: Current market price
-            
-        Returns:
-            True if stop is triggered, False otherwise
-        """
-        if self.stop_price is None:
-            return False
-        
-        if self.position == 'long':
-            # Stop triggered if price falls to or below stop price
-            return current_price <= self.stop_price
-        
-        elif self.position == 'short':
-            # Stop triggered if price rises to or above stop price
-            return current_price >= self.stop_price
-        
-        return False
-    
-    def close_position(self):
-        """Close the current position"""
-        try:
-            amount = 0.01
-            
-            if self.position == 'long':
-                # Sell to close long
-                self.exchange.create_market_sell_order(self.symbol, amount)
-                logger.info(f"❌ LONG position closed at market")
-            
-            elif self.position == 'short':
-                # Buy to close short
-                self.exchange.create_market_buy_order(self.symbol, amount)
-                logger.info(f"❌ SHORT position closed at market")
-            
-            self.position = None
-            self.entry_price = None
-            
-            # Cancel any pending stop order
-            if self.stop_order_id:
+
+                if price >= reversal_level:
+
+                    print(
+                        f"REVERSAL SELL -> BUY "
+                        f"@ {price:.{digits}f}"
+                    )
+
+                    try:
+
+                        if EXECUTE_ORDERS:
+
+                            positions = await connection.get_positions()
+
+                            for pos in positions:
+                                if pos.get("symbol") == SYMBOL:
+                                    await connection.close_position(
+                                        pos["id"]
+                                    )
+
+                            await connection.create_market_buy_order(
+                                SYMBOL,
+                                LOT_SIZE
+                            )
+
+                        position = "BUY"
+                        entry_price = price
+                        reversal_level = (
+                            price - trailing_distance
+                        )
+                        expansion_armed = False
+
+                    except Exception as e:
+                        print(
+                            "REVERSAL ERROR:",
+                            type(e).__name__,
+                            str(e)
+                        )
+
+            if (
+                not expansion
+                and abs_velocity <
+                max(
+                    baseline *
+                    (EXPANSION_MULTIPLIER * 0.75),
+                    1e-12
+                )
+            ):
+                expansion_armed = True
+
+            if (
+                position is None
+                and expansion
+                and direction
+                and expansion_armed
+                and now - last_signal_time >= COOLDOWN_SECONDS
+            ):
+
+                entry_price = (
+                    float(tick["ask"])
+                    if direction == "BUY"
+                    else float(tick["bid"])
+                )
+
+                reversal_level = (
+                    entry_price - trailing_distance
+                    if direction == "BUY"
+                    else entry_price + trailing_distance
+                )
+
+                print("")
+                print(">>> VELOCITY EXPANSION ENTRY <<<")
+                print("DIRECTION:", direction)
+                print("ENTRY:", round(entry_price, digits))
+                print("VELOCITY:", velocity)
+                print("BASELINE:", baseline)
+                print(
+                    "REVERSAL LEVEL:",
+                    round(reversal_level, digits)
+                )
+
                 try:
-                    self.exchange.cancel_order(self.stop_order_id, self.symbol)
-                except:
-                    pass
-            
-            self.stop_order_id = None
-            self.stop_price = None
-        
-        except Exception as e:
-            logger.error(f"Error closing position: {e}")
-    
-    def handle_stop_triggered(self, trigger_price):
-        """
-        Handle stop order trigger:
-        1. Close current position
-        2. Open opposite position at trigger price
-        3. Create new stop order 50 pips behind new position
-        
-        Args:
-            trigger_price: Price at which stop was triggered
-        """
-        logger.info(f"⚡ Stop order triggered at {trigger_price}")
-        
-        # Determine opposite direction
-        opposite_direction = 'short' if self.position == 'long' else 'long'
-        
-        # Close the current position
-        self.close_position()
-        
-        # Open opposite position at the trigger price
-        self.enter_position(opposite_direction, trigger_price)
-        
-        self.trade_count += 1
-        logger.info(f"🔄 Opposite position opened | Total trades: {self.trade_count}")
-    
-    def run(self):
-        """Main bot loop"""
-        logger.info(f"Starting Volatility + Momentum Bot on {self.symbol}")
-        logger.info(f"Timeframe: {self.timeframe}, Strategy: Volatility + Momentum with Opposite Position Swap")
-        logger.info("=" * 80)
-        
-        try:
-            while True:
-                try:
-                    # Fetch OHLCV data
-                    df = self.fetch_ohlcv(limit=50)
-                    if df is None or len(df) < 20:
-                        time.sleep(5)
-                        continue
-                    
-                    current_time = df['timestamp'].iloc[-1]
-                    current_price = df['close'].iloc[-1]
-                    
-                    # Only process on new candle
-                    if self.last_candle_time and current_time == self.last_candle_time:
-                        time.sleep(1)
-                        continue
-                    
-                    self.last_candle_time = current_time
-                    
-                    # Calculate indicators
-                    volatility = self.calculate_volatility(df)
-                    momentum = self.calculate_momentum(df)
-                    
-                    logger.info(f"⏰ {current_time} | 💰 {current_price:.2f} | "
-                              f"📊 ATR: {volatility:.6f} | 📈 RSI: {momentum:.2f} | "
-                              f"📍 Position: {self.position if self.position else 'NONE'}")
-                    
-                    # Check if stop order was triggered
-                    if self.position and self.check_stop_triggered(current_price):
-                        self.handle_stop_triggered(current_price)
-                    
-                    # Only enter new position if no open position
-                    if not self.position:
-                        direction = self.calculate_direction_bias(df, volatility, momentum)
-                        
-                        if direction:
-                            self.enter_position(direction, current_price)
-                    
-                    # Wait before next iteration
-                    time.sleep(1)
-                
+
+                    if EXECUTE_ORDERS:
+
+                        if direction == "BUY":
+
+                            result = (
+                                await connection
+                                .create_market_buy_order(
+                                    SYMBOL,
+                                    LOT_SIZE
+                                )
+                            )
+
+                        else:
+
+                            result = (
+                                await connection
+                                .create_market_sell_order(
+                                    SYMBOL,
+                                    LOT_SIZE
+                                )
+                            )
+
+                        print("ORDER SENT: YES")
+                        print("ORDER RESULT:", result)
+
+                    else:
+
+                        print(
+                            "ORDER SENT: NO "
+                            "(EXECUTE_ORDERS=false)"
+                        )
+
+                    position = direction
+                    last_signal_time = now
+                    expansion_armed = False
+
                 except Exception as e:
-                    logger.error(f"Error in main loop: {e}")
-                    time.sleep(5)
-        
-        except KeyboardInterrupt:
-            logger.info("\n🛑 Bot stopped by user")
-            if self.position:
-                self.close_position()
-            logger.info(f"Total trades executed: {self.trade_count}")
+
+                    print(
+                        "ENTRY ORDER ERROR:",
+                        type(e).__name__,
+                        str(e)
+                    )
+
+                    position = None
+                    entry_price = None
+                    reversal_level = None
+
+                print("")
+
+            await asyncio.sleep(POLL_SECONDS)
+
+    finally:
+
+        try:
+            await connection.close()
+        except Exception:
+            pass
+
+        api.close()
 
 
-def main():
-    """Entry point for the bot"""
-    # Configure your exchange credentials
-    # Set these from environment variables or config file for security
-    api_key = ''  # Add your API key
-    api_secret = ''  # Add your API secret
-    
-    bot = VolatilityMomentumBot(
-        exchange_id='binance',
-        symbol='BTC/USDT',
-        timeframe='1m',
-        api_key=api_key,
-        api_secret=api_secret
-    )
-    
-    # Run the bot
-    bot.run()
-
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    asyncio.run(main())
