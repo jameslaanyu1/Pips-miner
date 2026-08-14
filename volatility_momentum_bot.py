@@ -1,4 +1,5 @@
 import os
+MARGIN_FREE_PERCENT = float(os.getenv("MARGIN_FREE_PERCENT", "50"))
 import asyncio
 import math
 from metaapi_cloud_sdk import MetaApi
