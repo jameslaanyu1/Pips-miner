@@ -20,6 +20,7 @@ LEVERAGE = float(os.getenv("LEVERAGE", "400"))
 RISK_PERCENT = min(float(os.getenv("RISK_PERCENT", "5")), 5.0)
 MIN_LOT = float(os.getenv("MIN_LOT", "0.01"))
 MAX_LOT = float(os.getenv("MAX_LOT", "60"))
+RECONNECT_DELAY = float(os.getenv("RECONNECT_DELAY", "5"))
 
 
 def mid(tick):
@@ -40,10 +41,31 @@ def normalize_volume(raw, minimum, maximum, step):
     return round(max(minimum, min(minimum + steps * step, maximum)), 8)
 
 
-async def get_dynamic_lot(connection, specification, price, direction):
-    info = await connection.get_account_information()
-    balance = float(info.get("balance") or info.get("equity") or 0.0)
+async def get_dynamic_lot(connection, specification, price, direction="BUY"):
+    """
+    HARD RISK POLICY
+
+    1. Maximum trade risk = RISK_PERCENT of balance (normally 5%).
+    2. Leverage 1:400 is NOT used to force position size.
+    3. Actual MetaApi margin is checked before execution.
+    4. New trade may use at most MARGIN_FREE_PERCENT of free margin.
+    5. Volume is always rounded DOWN to broker volumeStep.
+    6. If the minimum executable volume cannot pass the checks: NO TRADE.
+    """
+
+    info = connection.terminal_state.account_information or {}
+
+    balance = float(
+        info.get("balance") or info.get("equity") or 0.0
+    )
     equity = float(info.get("equity") or balance)
+    free_margin = float(info.get("freeMargin") or 0.0)
+
+    if balance <= 0 or equity <= 0:
+        raise ValueError("Invalid account balance/equity")
+
+    if free_margin <= 0:
+        raise ValueError("No free margin available")
 
     risk_budget = balance * (RISK_PERCENT / 100.0)
 
@@ -53,54 +75,104 @@ async def get_dynamic_lot(connection, specification, price, direction):
         or 0.01
     )
 
-    risk_distance = TRAIL_PIPS * pip_size
-
     contract_size = float(
         specification.get("contractSize")
         or specification.get("tradeContractSize")
         or 100.0
     )
 
-    # XAUUSD monetary risk per lot:
-    # price distance × contract size.
-    one_lot_loss = abs(risk_distance * contract_size)
+    # Current strategy risk boundary: 100 pips.
+    risk_distance = float(TRAIL_PIPS) * pip_size
+
+    # XAUUSD monetary risk per 1.00 lot.
+    one_lot_loss = risk_distance * contract_size
 
     if one_lot_loss <= 0:
         raise ValueError("Unable to calculate XAUUSD risk")
 
-    # Maximum lot size allowed by the 5% risk budget.
+    # Risk-based maximum. This is NEVER increased because of leverage.
     risk_lot = risk_budget / one_lot_loss
 
-    # Maximum lot size allowed by 1:400 leverage.
-    margin_lot = (
-        equity * LEVERAGE
-    ) / (price * contract_size)
-
-    raw_lot = min(risk_lot, margin_lot)
-
-    lot = normalize_volume(
-        raw_lot,
-        specification.get("minVolume", MIN_LOT),
-        specification.get("maxVolume", MAX_LOT),
-        specification.get("volumeStep", 0.01)
+    minimum = float(
+        specification.get("minVolume") or MIN_LOT
+    )
+    maximum = float(
+        specification.get("maxVolume") or MAX_LOT
+    )
+    step = float(
+        specification.get("volumeStep") or 0.01
     )
 
-    # Never exceed the 5% risk budget after volume rounding.
-    final_loss = lot * one_lot_loss
+    maximum = min(maximum, MAX_LOT)
 
-    if final_loss > risk_budget + 1e-9:
-        step = float(specification.get("volumeStep", 0.01))
-        lot = normalize_volume(
-            lot - step,
-            specification.get("minVolume", MIN_LOT),
-            specification.get("maxVolume", MAX_LOT),
-            step
+    # Broker/account margin safety reserve.
+    allowed_margin = free_margin * (MARGIN_FREE_PERCENT / 100.0)
+
+    def normalize_down(volume):
+        if volume < minimum:
+            return 0.0
+        volume = min(volume, maximum)
+        steps = int(volume / step + 1e-9)
+        return round(steps * step, 8)
+
+    async def margin_for(volume):
+        order_type = (
+            "ORDER_TYPE_BUY"
+            if str(direction).upper() == "BUY"
+            else "ORDER_TYPE_SELL"
         )
+
+        result = await connection.calculate_margin(
+            symbol=SYMBOL,
+            order_type=order_type,
+            volume=volume,
+            open_price=float(price)
+        )
+
+        if isinstance(result, dict):
+            return float(
+                result.get("margin")
+                or result.get("requiredMargin")
+                or 0.0
+            )
+
+        return float(getattr(result, "margin", 0.0) or 0.0)
+
+    # Never exceed the 5% risk budget.
+    lot = normalize_down(risk_lot)
+
+    if lot <= 0:
+        raise ValueError(
+            f"NO TRADE: minimum lot exceeds {RISK_PERCENT}% risk budget"
+        )
+
+    # Reduce lot until BOTH risk and actual margin pass.
+    while lot >= minimum:
         final_loss = lot * one_lot_loss
 
-    return lot, balance, equity, risk_budget, final_loss
+        if final_loss > risk_budget + 1e-8:
+            lot = normalize_down(lot - step)
+            continue
 
+        required_margin = await margin_for(lot)
 
+        if required_margin > 0 and required_margin <= allowed_margin:
+            print(
+                f"RISK CHECK: balance={balance:.2f} "
+                f"risk_limit={risk_budget:.2f} "
+                f"lot={lot:.2f} "
+                f"risk={final_loss:.2f} "
+                f"margin={required_margin:.2f} "
+                f"free_margin={free_margin:.2f}"
+            )
+            return lot, equity
+
+        lot = normalize_down(lot - step)
+
+    raise ValueError(
+        "NO TRADE: no volume satisfies both the 5% risk limit "
+        "and the available-margin safety limit"
+    )
 async def main():
 
     token = os.environ["METAAPI_TOKEN"]
@@ -126,14 +198,28 @@ async def main():
                 "MetaApi account is not connected."
             )
 
-        connection = account.get_rpc_connection()
+        connection = account.get_streaming_connection()
 
         await connection.connect()
         await connection.wait_synchronized()
 
-        specification = await connection.get_symbol_specification(
-            SYMBOL
+        if not connection.terminal_state.connected_to_broker:
+            raise RuntimeError("MetaTrader terminal is not connected to broker")
+
+        await connection.subscribe_to_market_data(
+            symbol=SYMBOL
         )
+
+        terminal_state = connection.terminal_state
+
+        specification = terminal_state.specification(
+            symbol=SYMBOL
+        )
+
+        if not specification:
+            raise RuntimeError(
+                f"No symbol specification available for {SYMBOL}"
+            )
 
         digits = specification.get("digits", 2)
         point = specification.get("point")
@@ -143,7 +229,27 @@ async def main():
 
         trailing_distance = TRAIL_PIPS * point
 
-        preview_quote = await connection.get_symbol_price(SYMBOL)
+        preview_quote = None
+
+        for _ in range(40):
+            preview_quote = connection.terminal_state.price(
+                symbol=SYMBOL
+            )
+
+            if (
+                preview_quote
+                and preview_quote.get("bid") is not None
+                and preview_quote.get("ask") is not None
+            ):
+                break
+
+            await asyncio.sleep(0.25)
+
+        if not preview_quote:
+            raise TimeoutError(
+                f"No streaming XAUUSD quote received"
+            )
+
         preview_price = mid(preview_quote)
         preview_direction = "BUY"
         dynamic_lot, balance, equity, risk_budget, preview_loss = await get_dynamic_lot(
@@ -153,7 +259,7 @@ async def main():
             preview_direction
         )
 
-        print("RPC: CONNECTED + SYNCHRONIZED")
+        print("STREAMING: CONNECTED + SYNCHRONIZED")
         print("Symbol:", SYMBOL)
         print("Account balance:", round(balance, 2))
         print("Account equity:", round(equity, 2))
@@ -188,7 +294,7 @@ async def main():
         while True:
 
             try:
-                tick = await connection.get_symbol_price(SYMBOL)
+                tick = connection.terminal_state.price(symbol=SYMBOL)
 
             except Exception as e:
                 error_name = type(e).__name__
@@ -213,11 +319,27 @@ async def main():
                     await asyncio.sleep(RECONNECT_DELAY)
 
                     try:
-                        connection = account.get_rpc_connection()
+                        connection = account.get_streaming_connection()
                         await connection.connect()
                         await connection.wait_synchronized()
 
-                        print(">>> METAAPI RECONNECTED + SYNCHRONIZED <<<")
+                        if not connection.terminal_state.connected_to_broker:
+                            raise RuntimeError(
+                                "MetaTrader terminal is not connected to broker"
+                            )
+
+                        await connection.subscribe_to_market_data(
+                            symbol=SYMBOL
+                        )
+
+                        terminal_state = connection.terminal_state
+
+                        specification = terminal_state.specification(
+                            symbol=SYMBOL
+                        )
+
+                        print(">>> METAAPI STREAM RECONNECTED + SYNCHRONIZED <<<")
+                        print(">>> XAUUSD QUOTES RESUBSCRIBED <<<")
                         print("XAUUSD ENGINE RESUMED")
                         continue
 
@@ -346,7 +468,7 @@ async def main():
 
                         if EXECUTE_ORDERS:
 
-                            positions = await connection.get_positions()
+                            positions = list(terminal_state.positions)
 
                             for pos in positions:
                                 if pos.get("symbol") == SYMBOL:
@@ -403,7 +525,7 @@ async def main():
 
                         if EXECUTE_ORDERS:
 
-                            positions = await connection.get_positions()
+                            positions = list(terminal_state.positions)
 
                             for pos in positions:
                                 if pos.get("symbol") == SYMBOL:
