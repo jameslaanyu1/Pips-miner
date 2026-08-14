@@ -198,11 +198,13 @@ async def main():
             elif price_momentum < 0 and atr > 0:
                 direction = "SELL"
 
+            momentum_display = f"{momentum:.2f}" if momentum is not None else "N/A"
+
             print(
                 f"SIGNAL "
                 f"PRICE={price:.2f} "
                 f"ATR={atr:.2f} "
-                f"RSI={momentum:.2f} "
+                f"RSI={momentum_display} "
                 f"BIAS={direction or 'NONE'}"
             )
 
