@@ -290,9 +290,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () {
                       botProvider.updateSettings(
-                        apiToken: _apiTokenController.text,
-                        demoAccountId: _demoAccountController.text,
-                        liveAccountId: _liveAccountController.text,
                         symbol: _symbolController.text,
                         volume: double.tryParse(_volumeController.text) ?? 0.01,
                       );
