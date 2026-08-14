@@ -1,4 +1,4 @@
-name: Build Pip-life FX APK
+name: Build Pips Miner APK
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
         working-directory: mobile_app
 
     steps:
-      - name: Checkout
+      - name: Checkout Pips-miner
         uses: actions/checkout@v4
 
       - name: Setup Flutter
@@ -26,13 +26,10 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Flutter doctor
-        run: flutter doctor -v
-
-      - name: Get dependencies
+      - name: Install dependencies
         run: flutter pub get
 
-      - name: Generate launcher icons
+      - name: Generate app icon
         run: dart run flutter_launcher_icons
 
       - name: Build release APK
@@ -41,5 +38,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: pips-life-fx-apk
+          name: pips-miner-apk
           path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
