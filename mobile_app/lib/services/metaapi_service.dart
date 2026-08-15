@@ -77,7 +77,7 @@ class MetaApiService {
     int? magic,
   }) async {
     return _trade({
-      'action': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+      'actionType': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
       'symbol': symbol,
       'volume': volume,
       if (clientId != null) 'clientId': clientId,
@@ -94,7 +94,7 @@ class MetaApiService {
     int? magic,
   }) async {
     return _trade({
-      'action': buy ? 'ORDER_TYPE_BUY_STOP' : 'ORDER_TYPE_SELL_STOP',
+      'actionType': buy ? 'ORDER_TYPE_BUY_STOP' : 'ORDER_TYPE_SELL_STOP',
       'symbol': symbol,
       'volume': volume,
       'openPrice': openPrice,
@@ -108,15 +108,22 @@ class MetaApiService {
     required double openPrice,
   }) async {
     return _trade({
-      'action': 'ORDER_MODIFY',
+      'actionType': 'ORDER_MODIFY',
       'orderId': orderId,
       'openPrice': openPrice,
     });
   }
 
+  Future<Map<String, dynamic>> cancelOrder(String orderId) async {
+    return _trade({
+      'actionType': 'ORDER_CANCEL',
+      'orderId': orderId,
+    });
+  }
+
   Future<Map<String, dynamic>> closePosition(String positionId) async {
     return _trade({
-      'action': 'POSITION_CLOSE_ID',
+      'actionType': 'POSITION_CLOSE_ID',
       'positionId': positionId,
     });
   }

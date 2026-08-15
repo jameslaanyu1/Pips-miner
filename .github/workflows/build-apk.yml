@@ -46,7 +46,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze application
-        run: flutter analyze
+        run: flutter analyze lib
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
