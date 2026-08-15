@@ -42,6 +42,10 @@ jobs:
             --org=com.pipsminer \
             .
 
+      - name: Set Android compile SDK
+        run: |
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+
       - name: Install dependencies
         run: flutter pub get
 
