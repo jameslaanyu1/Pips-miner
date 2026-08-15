@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 import '../models/trading_config.dart';
 import '../services/metaapi_service.dart';
@@ -54,9 +56,7 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateSettings({
-    String? symbol,
-  }) {
+  void updateSettings({String? symbol}) {
     if (symbol != null && symbol.trim().isNotEmpty) {
       _symbol = symbol.trim().toUpperCase();
     }
@@ -68,36 +68,27 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final token = await _storage.token();
-      final accountId = _isLiveAccount
-          ? await _storage.liveAccountId()
-          : await _storage.demoAccountId();
-      final host = await _storage.host();
+      final session = await _storage.sessionToken();
+      final backend = await _storage.backendUrl();
 
-      if (token == null || token.trim().isEmpty) {
+      if (session == null || session.isEmpty) {
         _isConnected = false;
         _connectionError =
-            'MetaAPI token is missing. Open Settings and save your token.';
+            'MT5 account is not connected. Open Settings and connect your account.';
         notifyListeners();
         return;
       }
 
-      if (accountId == null || accountId.trim().isEmpty) {
+      if (backend == null || backend.isEmpty) {
         _isConnected = false;
-        _connectionError =
-            '${accountMode} account ID is missing. Open Settings and save the account ID.';
+        _connectionError = 'Pips-Miner backend address is not configured.';
         notifyListeners();
         return;
       }
-
-      final apiHost = (host == null || host.trim().isEmpty)
-          ? 'https://mt-client-api-v1.london.agiliumtrade.ai'
-          : host.trim();
 
       _api = MetaApiService(
-        token: token.trim(),
-        accountId: accountId.trim(),
-        host: apiHost,
+        sessionToken: session,
+        baseUrl: backend,
       );
 
       await _api!.accountInformation();
@@ -110,9 +101,66 @@ class BotProvider extends ChangeNotifier {
     } catch (e) {
       _isConnected = false;
       _connectionError = _friendlyConnectionError(e);
-
-      debugPrint('MetaApi connection error: $e');
+      debugPrint('Pips-Miner connection error: $e');
       notifyListeners();
+    }
+  }
+
+  Future<bool> connectMt5({
+    required String backendUrl,
+    required String login,
+    required String password,
+    required String server,
+  }) async {
+    _connectionError = null;
+    notifyListeners();
+
+    try {
+      final response = await http.post(
+        Uri.parse(
+          '${backendUrl.replaceFirst(RegExp(r'/$'), '')}/api/v1/connect',
+        ),
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'login': login.trim(),
+          'password': password,
+          'server': server.trim(),
+          'platform': 'mt5',
+        }),
+      );
+
+      final decoded = jsonDecode(response.body);
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          decoded is Map && decoded['error'] != null
+              ? decoded['error'].toString()
+              : 'MT5 connection failed.',
+        );
+      }
+
+      if (decoded is! Map || decoded['sessionToken'] == null) {
+        throw Exception('Backend did not return a valid session.');
+      }
+
+      await _storage.saveConnection(
+        sessionToken: decoded['sessionToken'].toString(),
+        backendUrl: backendUrl.trim(),
+        login: login.trim(),
+        server: server.trim(),
+        platform: 'mt5',
+      );
+
+      await connect();
+      return _isConnected;
+    } catch (e) {
+      _isConnected = false;
+      _connectionError = e.toString().replaceFirst('Exception: ', '');
+      notifyListeners();
+      return false;
     }
   }
 
@@ -120,24 +168,16 @@ class BotProvider extends ChangeNotifier {
     final message = error.toString();
     final lower = message.toLowerCase();
 
-    if (lower.contains('http 401') || lower.contains('http 403')) {
-      return 'MetaAPI rejected the token. Check the MetaAPI token in Settings.';
+    if (lower.contains('401') || lower.contains('403')) {
+      return 'Pips-Miner authentication failed. Connect the MT5 account again.';
     }
 
-    if (lower.contains('http 404')) {
-      return 'MetaAPI could not find this account. Check the selected ${accountMode} account ID.';
+    if (lower.contains('404')) {
+      return 'The Pips-Miner backend could not find this account.';
     }
 
-    if (lower.contains('http 409')) {
-      return 'MetaAPI account is not ready. Check that the account is deployed and connected.';
-    }
-
-    if (lower.contains('http 429')) {
-      return 'MetaAPI rate limit reached. Please wait and reconnect.';
-    }
-
-    if (lower.contains('http 5')) {
-      return 'MetaAPI server error. Check the internet connection and try again.';
+    if (lower.contains('429')) {
+      return 'Too many requests. Please wait and reconnect.';
     }
 
     if (lower.contains('socketexception') ||
@@ -146,45 +186,40 @@ class BotProvider extends ChangeNotifier {
     }
 
     if (lower.contains('timeout')) {
-      return 'MetaAPI connection timed out. Check the internet connection and try again.';
+      return 'Connection timed out. Check the internet connection and try again.';
     }
 
-    return 'MetaAPI connection failed. Open Settings and verify the token, account ID and host.';
+    return 'Pips-Miner connection failed: $message';
   }
 
   Future<void> startBot() async {
-    try {
-      if (!_isConnected || _api == null) {
-        await connect();
-      }
-
-      if (!_isConnected || _api == null) {
-        throw Exception(
-          'MetaApi is not connected. Save the token and account ID first.',
-        );
-      }
-
-      final config = TradingConfig(
-        symbol: _symbol,
-        trailingPips: 100.0,
-        reversalPips: 100.0,
-        velocityBaselinePeriod: 14,
-        velocityExpansionThreshold: 1.5,
-      );
-
-      _engine = VelocityReversalEngine(
-        api: _api!,
-        config: config,
-      );
-
-      await _engine!.start();
-      _isBotRunning = true;
-      _startUpdates();
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error starting velocity engine: $e');
-      rethrow;
+    if (!_isConnected || _api == null) {
+      await connect();
     }
+
+    if (!_isConnected || _api == null) {
+      throw Exception(
+        'MT5 is not connected. Connect the account first.',
+      );
+    }
+
+    final config = TradingConfig(
+      symbol: _symbol,
+      trailingPips: 100.0,
+      reversalPips: 100.0,
+      velocityBaselinePeriod: 14,
+      velocityExpansionThreshold: 1.5,
+    );
+
+    _engine = VelocityReversalEngine(
+      api: _api!,
+      config: config,
+    );
+
+    await _engine!.start();
+    _isBotRunning = true;
+    _startUpdates();
+    notifyListeners();
   }
 
   Future<void> stopBot() async {
@@ -219,9 +254,12 @@ class BotProvider extends ChangeNotifier {
       if (api == null) return;
 
       final positions = await api.positions();
-      final strategy = positions.whereType<Map>().map(
-        (p) => Map<String, dynamic>.from(p),
-      ).where((p) => p['symbol']?.toString() == _symbol).toList();
+
+      final strategy = positions
+          .whereType<Map>()
+          .map((p) => Map<String, dynamic>.from(p))
+          .where((p) => p['symbol']?.toString() == _symbol)
+          .toList();
 
       if (strategy.isNotEmpty) {
         final p = strategy.first;
@@ -237,14 +275,17 @@ class BotProvider extends ChangeNotifier {
 
       final info = await api.accountInformation();
       _balance = _number(info['balance']) ?? _balance;
-      _profitLoss = _number(info['equity']) != null
-          ? (_number(info['equity'])! - _balance)
-          : _profitLoss;
+
+      final equity = _number(info['equity']);
+      if (equity != null) {
+        _profitLoss = equity - _balance;
+      }
 
       _isBotRunning = _engine?.running ?? false;
     } catch (e) {
       debugPrint('Status error: $e');
     }
+
     notifyListeners();
   }
 

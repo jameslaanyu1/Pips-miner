@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import 'package:pips_miner_app/providers/bot_provider.dart';
 import 'package:pips_miner_app/services/secure_storage_service.dart';
 
@@ -11,65 +12,214 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late TextEditingController _demoAccountController;
-  late TextEditingController _liveAccountController;
-  late TextEditingController _apiTokenController;
-  late TextEditingController _symbolController;
-  late TextEditingController _hostController;
   final SecureStorageService _storage = SecureStorageService();
+
+  late final TextEditingController _loginController;
+  late final TextEditingController _serverController;
+  late final TextEditingController _passwordController;
+  late final TextEditingController _backendController;
+  late final TextEditingController _symbolController;
 
   @override
   void initState() {
     super.initState();
-    _demoAccountController = TextEditingController();
-    _liveAccountController = TextEditingController();
-    _apiTokenController = TextEditingController();
-    _symbolController = TextEditingController();
-    _hostController = TextEditingController(
-      text: 'https://mt-client-api-v1.london.agiliumtrade.ai',
-    );
-    _loadCredentials();
+
+    _loginController = TextEditingController();
+    _serverController = TextEditingController();
+    _passwordController = TextEditingController();
+    _backendController = TextEditingController();
+    _symbolController = TextEditingController(text: 'XAUUSD');
+
+    _loadConnection();
   }
 
   @override
   void dispose() {
-    _demoAccountController.dispose();
-    _liveAccountController.dispose();
-    _apiTokenController.dispose();
+    _loginController.dispose();
+    _serverController.dispose();
+    _passwordController.dispose();
+    _backendController.dispose();
     _symbolController.dispose();
-    _hostController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadCredentials() async {
-    final token = await _storage.token();
-    final demo = await _storage.demoAccountId();
-    final live = await _storage.liveAccountId();
-    final host = await _storage.host();
+  Future<void> _loadConnection() async {
+    final login = await _storage.login();
+    final server = await _storage.server();
+    final backend = await _storage.backendUrl();
+
     if (!mounted) return;
+
     setState(() {
-      _apiTokenController.text = token ?? '';
-      _demoAccountController.text = demo ?? '';
-      _liveAccountController.text = live ?? '';
-      if (host != null && host.isNotEmpty) _hostController.text = host;
+      _loginController.text = login ?? '';
+      _serverController.text = server ?? '';
+      _backendController.text = backend ?? '';
     });
+  }
+
+  Future<void> _connect(BotProvider bot) async {
+    final backend = _backendController.text.trim();
+    final login = _loginController.text.trim();
+    final password = _passwordController.text;
+    final server = _serverController.text.trim();
+
+    if (backend.isEmpty ||
+        login.isEmpty ||
+        password.isEmpty ||
+        server.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter the backend, MT5 account number, broker server and password.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final success = await bot.connectMt5(
+      backendUrl: backend,
+      login: login,
+      password: password,
+      server: server,
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? 'MT5 account connected successfully.'
+              : bot.connectionError ?? 'MT5 connection failed.',
+        ),
+        backgroundColor: success ? Colors.green : Colors.red,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: const Text('Pips-Miner Settings'),
         elevation: 0,
       ),
       body: Consumer<BotProvider>(
-        builder: (context, botProvider, _) {
+        builder: (context, bot, _) {
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Account Type Selector
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'MT5 Account',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Enter your MT5 broker details. Your MetaApi credentials are managed by the Pips-Miner backend.',
+                        ),
+                        const SizedBox(height: 16),
+
+                        TextField(
+                          controller: _loginController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'MT5 Account Number',
+                            prefixIcon: Icon(Icons.account_balance),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        TextField(
+                          controller: _serverController,
+                          decoration: const InputDecoration(
+                            labelText: 'Broker Server',
+                            hintText: 'Example: Broker-MT5',
+                            prefixIcon: Icon(Icons.dns),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'MT5 Trading Password',
+                            prefixIcon: Icon(Icons.lock),
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        TextField(
+                          controller: _backendController,
+                          decoration: const InputDecoration(
+                            labelText: 'Pips-Miner Backend',
+                            hintText: 'https://your-pips-miner-api.example',
+                            prefixIcon: Icon(Icons.cloud),
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed:
+                                bot.isBotRunning ? null : () => _connect(bot),
+                            icon: const Icon(Icons.link),
+                            label: const Text('CONNECT MT5'),
+                            style: ElevatedButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                          ),
+                        ),
+
+                        if (bot.isConnected) ...[
+                          const SizedBox(height: 12),
+                          const Row(
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.green),
+                              SizedBox(width: 8),
+                              Text(
+                                'MT5 CONNECTED',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+
+                        if (bot.connectionError != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            bot.connectionError!,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -83,169 +233,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => botProvider.setAccountMode(false),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: !botProvider.isLiveAccount
-                                          ? Colors.blue
-                                          : Colors.transparent,
-                                      borderRadius: const BorderRadius.only(
-                                        topLeft: Radius.circular(7),
-                                        bottomLeft: Radius.circular(7),
-                                      ),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        const Icon(Icons.science, size: 28),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'DEMO',
-                                          style: TextStyle(
-                                            color: !botProvider.isLiveAccount
-                                                ? Colors.white
-                                                : Colors.grey,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => botProvider.setAccountMode(true),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: botProvider.isLiveAccount
-                                          ? Colors.red
-                                          : Colors.transparent,
-                                      borderRadius: const BorderRadius.only(
-                                        topRight: Radius.circular(7),
-                                        bottomRight: Radius.circular(7),
-                                      ),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        const Icon(Icons.trending_up, size: 28),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'LIVE',
-                                          style: TextStyle(
-                                            color: botProvider.isLiveAccount
-                                                ? Colors.white
-                                                : Colors.grey,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                         const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: botProvider.isLiveAccount
-                                ? Colors.red.withOpacity(0.2)
-                                : Colors.blue.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            botProvider.isLiveAccount
-                                ? '⚠️ Trading with REAL MONEY - Be Careful!'
-                                : '✅ Demo Mode - Risk Free Practice',
-                            style: TextStyle(
-                              color: botProvider.isLiveAccount
-                                  ? Colors.red
-                                  : Colors.blue,
-                              fontWeight: FontWeight.bold,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () => bot.setAccountMode(false),
+                                child: const Text('DEMO'),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () => bot.setAccountMode(true),
+                                child: const Text('LIVE'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // API Configuration
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'API Configuration',
+                        const SizedBox(height: 12),
+                        Text(
+                          bot.isLiveAccount
+                              ? 'LIVE MODE — real money'
+                              : 'DEMO MODE — practice account',
                           style: TextStyle(
-                            fontSize: 18,
                             fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _apiTokenController,
-                          decoration: const InputDecoration(
-                            labelText: 'MetaAPI Token',
-                            hintText: 'Enter your MetaAPI token',
-                            prefixIcon: Icon(Icons.vpn_key),
-                          ),
-                          obscureText: true,
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _demoAccountController,
-                          decoration: const InputDecoration(
-                            labelText: 'Demo Account ID',
-                            hintText: 'Enter demo account ID',
-                            prefixIcon: Icon(Icons.account_balance),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _liveAccountController,
-                          decoration: const InputDecoration(
-                            labelText: 'Live Account ID',
-                            hintText: 'Enter live account ID',
-                            prefixIcon: Icon(Icons.account_balance),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _hostController,
-                          decoration: const InputDecoration(
-                            labelText: 'MetaApi Host',
-                            hintText: 'https://mt-client-api-v1.london.agiliumtrade.ai',
-                            prefixIcon: Icon(Icons.cloud),
+                            color: bot.isLiveAccount
+                                ? Colors.red
+                                : Colors.blue,
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 20),
 
-                // Trading Configuration
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -264,88 +288,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _symbolController,
                           decoration: const InputDecoration(
                             labelText: 'Trading Symbol',
-                            hintText: 'e.g., EURUSD, GBPUSD',
+                            hintText: 'XAUUSD',
                             prefixIcon: Icon(Icons.trending_up),
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(Icons.auto_graph, color: Colors.green),
-                              SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Automatic position sizing: 1% of the current account balance per new position. The broker\'s live minimum volume, maximum volume and volume step are applied separately for each symbol. Margin is checked before the order is sent.',
-                                  style: TextStyle(fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ],
-                          ),
+                          onChanged: (value) {
+                            bot.updateSettings(symbol: value);
+                          },
                         ),
                         const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Stop Loss (Pips)',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Text(
-                                '100 pips',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ],
+                        const Text(
+                          'Automatic position sizing uses the connected account balance and the broker\'s live symbol specification.',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Reversal distance: 100 pips\nTrailing distance: 100 pips',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Save Button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      botProvider.updateSettings(
-                        symbol: _symbolController.text,
-                      );
-                      _storage.saveCredentials(
-                        token: _apiTokenController.text.trim(),
-                        demoAccountId: _demoAccountController.text.trim(),
-                        liveAccountId: _liveAccountController.text.trim(),
-                        host: _hostController.text.trim(),
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Settings saved successfully'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.save),
-                    label: const Text('SAVE SETTINGS'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      backgroundColor: Colors.green,
                     ),
                   ),
                 ),

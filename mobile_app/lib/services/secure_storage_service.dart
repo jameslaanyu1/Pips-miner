@@ -3,32 +3,46 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class SecureStorageService {
   static const _storage = FlutterSecureStorage();
 
-  static const _tokenKey = 'metaapi_token';
-  static const _demoAccountIdKey = 'metaapi_demo_account_id';
-  static const _liveAccountIdKey = 'metaapi_live_account_id';
-  static const _hostKey = 'metaapi_host';
+  static const _sessionTokenKey = 'pipsminer_session_token';
+  static const _backendUrlKey = 'pipsminer_backend_url';
+  static const _loginKey = 'mt5_login';
+  static const _serverKey = 'mt5_server';
+  static const _platformKey = 'mt5_platform';
 
-  Future<void> saveCredentials({
-    required String token,
-    required String demoAccountId,
-    required String liveAccountId,
-    required String host,
+  Future<void> saveConnection({
+    required String sessionToken,
+    required String backendUrl,
+    required String login,
+    required String server,
+    required String platform,
   }) async {
-    await _storage.write(key: _tokenKey, value: token);
-    await _storage.write(key: _demoAccountIdKey, value: demoAccountId);
-    await _storage.write(key: _liveAccountIdKey, value: liveAccountId);
-    await _storage.write(key: _hostKey, value: host);
+    await _storage.write(key: _sessionTokenKey, value: sessionToken);
+    await _storage.write(key: _backendUrlKey, value: backendUrl);
+    await _storage.write(key: _loginKey, value: login);
+    await _storage.write(key: _serverKey, value: server);
+    await _storage.write(key: _platformKey, value: platform);
   }
 
-  Future<String?> token() => _storage.read(key: _tokenKey);
-  Future<String?> demoAccountId() => _storage.read(key: _demoAccountIdKey);
-  Future<String?> liveAccountId() => _storage.read(key: _liveAccountIdKey);
-  Future<String?> host() => _storage.read(key: _hostKey);
+  Future<String?> sessionToken() =>
+      _storage.read(key: _sessionTokenKey);
+
+  Future<String?> backendUrl() =>
+      _storage.read(key: _backendUrlKey);
+
+  Future<String?> login() =>
+      _storage.read(key: _loginKey);
+
+  Future<String?> server() =>
+      _storage.read(key: _serverKey);
+
+  Future<String?> platform() =>
+      _storage.read(key: _platformKey);
 
   Future<void> clear() async {
-    await _storage.delete(key: _tokenKey);
-    await _storage.delete(key: _demoAccountIdKey);
-    await _storage.delete(key: _liveAccountIdKey);
-    await _storage.delete(key: _hostKey);
+    await _storage.delete(key: _sessionTokenKey);
+    await _storage.delete(key: _backendUrlKey);
+    await _storage.delete(key: _loginKey);
+    await _storage.delete(key: _serverKey);
+    await _storage.delete(key: _platformKey);
   }
 }

@@ -3,46 +3,45 @@ import 'package:http/http.dart' as http;
 
 class MetaApiService {
   MetaApiService({
-    required this.token,
-    required this.accountId,
-    required this.host,
+    required this.sessionToken,
+    required this.baseUrl,
   });
 
-  final String token;
-  final String accountId;
-  final String host;
+  final String sessionToken;
+  final String baseUrl;
 
   Map<String, String> get _headers => {
-        'auth-token': token,
+        'Authorization': 'Bearer $sessionToken',
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       };
 
   Uri _uri(String path) {
-    final cleanHost = host.replaceFirst(RegExp(r'/$'), '');
-    return Uri.parse(
-      '$cleanHost/users/current/accounts/$accountId$path',
-    );
+    final clean = baseUrl.replaceFirst(RegExp(r'/$'), '');
+    return Uri.parse('$clean$path');
   }
 
   Future<Map<String, dynamic>> accountInformation() async {
-    final response = await http.get(_uri('/account-information'), headers: _headers);
+    final response =
+        await http.get(_uri('/api/v1/account-information'), headers: _headers);
     return _map(response);
   }
 
   Future<List<dynamic>> positions() async {
-    final response = await http.get(_uri('/positions'), headers: _headers);
+    final response =
+        await http.get(_uri('/api/v1/positions'), headers: _headers);
     return _list(response);
   }
 
   Future<List<dynamic>> orders() async {
-    final response = await http.get(_uri('/orders'), headers: _headers);
+    final response =
+        await http.get(_uri('/api/v1/orders'), headers: _headers);
     return _list(response);
   }
 
   Future<Map<String, dynamic>> symbolPrice(String symbol) async {
     final response = await http.get(
-      _uri('/symbols/${Uri.encodeComponent(symbol)}/current-price'),
+      _uri('/api/v1/symbols/${Uri.encodeComponent(symbol)}/current-price'),
       headers: _headers,
     );
     return _map(response);
@@ -50,7 +49,7 @@ class MetaApiService {
 
   Future<Map<String, dynamic>> symbolSpecification(String symbol) async {
     final response = await http.get(
-      _uri('/symbols/${Uri.encodeComponent(symbol)}/specification'),
+      _uri('/api/v1/symbols/${Uri.encodeComponent(symbol)}/specification'),
       headers: _headers,
     );
     return _map(response);
@@ -62,7 +61,7 @@ class MetaApiService {
   }) async {
     final response = await http.get(
       _uri(
-        '/symbols/${Uri.encodeComponent(symbol)}/current-candles/$timeframe',
+        '/api/v1/symbols/${Uri.encodeComponent(symbol)}/current-candles/$timeframe',
       ),
       headers: _headers,
     );
@@ -75,7 +74,7 @@ class MetaApiService {
     required bool buy,
     String? clientId,
     int? magic,
-  }) async {
+  }) {
     return _trade({
       'actionType': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
       'symbol': symbol,
@@ -92,7 +91,7 @@ class MetaApiService {
     required double openPrice,
     String? clientId,
     int? magic,
-  }) async {
+  }) {
     return _trade({
       'actionType': buy ? 'ORDER_TYPE_BUY_STOP' : 'ORDER_TYPE_SELL_STOP',
       'symbol': symbol,
@@ -106,7 +105,7 @@ class MetaApiService {
   Future<Map<String, dynamic>> modifyOrder({
     required String orderId,
     required double openPrice,
-  }) async {
+  }) {
     return _trade({
       'actionType': 'ORDER_MODIFY',
       'orderId': orderId,
@@ -114,14 +113,14 @@ class MetaApiService {
     });
   }
 
-  Future<Map<String, dynamic>> cancelOrder(String orderId) async {
+  Future<Map<String, dynamic>> cancelOrder(String orderId) {
     return _trade({
       'actionType': 'ORDER_CANCEL',
       'orderId': orderId,
     });
   }
 
-  Future<Map<String, dynamic>> closePosition(String positionId) async {
+  Future<Map<String, dynamic>> closePosition(String positionId) {
     return _trade({
       'actionType': 'POSITION_CLOSE_ID',
       'positionId': positionId,
@@ -135,7 +134,7 @@ class MetaApiService {
     required double openPrice,
   }) async {
     final response = await http.post(
-      _uri('/calculate-margin'),
+      _uri('/api/v1/calculate-margin'),
       headers: _headers,
       body: jsonEncode({
         'symbol': symbol,
@@ -149,7 +148,7 @@ class MetaApiService {
 
   Future<Map<String, dynamic>> _trade(Map<String, dynamic> body) async {
     final response = await http.post(
-      _uri('/trade'),
+      _uri('/api/v1/trade'),
       headers: _headers,
       body: jsonEncode(body),
     );
@@ -160,20 +159,20 @@ class MetaApiService {
     _check(response);
     final decoded = jsonDecode(response.body);
     if (decoded is Map<String, dynamic>) return decoded;
-    throw Exception('Unexpected MetaApi response');
+    throw Exception('Unexpected Pips-Miner response');
   }
 
   List<dynamic> _list(http.Response response) {
     _check(response);
     final decoded = jsonDecode(response.body);
     if (decoded is List) return decoded;
-    throw Exception('Unexpected MetaApi list response');
+    throw Exception('Unexpected Pips-Miner list response');
   }
 
   void _check(http.Response response) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(
-        'MetaApi HTTP ${response.statusCode}: ${response.body}',
+        'Pips-Miner HTTP ${response.statusCode}: ${response.body}',
       );
     }
   }
