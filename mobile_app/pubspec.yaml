@@ -42,10 +42,8 @@ dependencies:
   equatable: ^2.0.5
   
   # Notifications
-  flutter_local_notifications: ^14.1.0
   
   # Background Tasks
-  workmanager: ^0.5.1
   
   # Connectivity
   connectivity_plus: ^5.0.0
