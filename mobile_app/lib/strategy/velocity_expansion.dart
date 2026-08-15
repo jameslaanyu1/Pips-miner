@@ -124,7 +124,7 @@ class VelocityExpansion {
 
     final currentVolume = current.volume;
 
-    final volumeExpansionRatio =
+    final double volumeExpansionRatio =
         baselineVolume > 0
             ? currentVolume / baselineVolume
             : 0;
