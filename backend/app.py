@@ -1,208 +1,196 @@
-"""
-Flask Backend API for Volatility + Momentum Trading Bot
-Provides REST endpoints for bot control and monitoring
-"""
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room
-import asyncio
-import logging
-from datetime import datetime
 import os
-from dotenv import load_dotenv
-from metaapi_bot import MetaAPITradingBot
-import threading
-import json
-
-load_dotenv()
+import signal
+import subprocess
+import sys
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Global bot instance
-bot = None
-bot_thread = None
-bot_running = False
+bot_process = None
+bot_mode = "DEMO"
+bot_symbol = "XAUUSD"
 
 
-@app.route('/api/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'bot_running': bot_running
-    })
+def bot_running():
+    return bot_process is not None and bot_process.poll() is None
 
 
-@app.route('/api/config', methods=['POST'])
-def configure_bot():
-    """Configure bot with account credentials"""
-    try:
-        data = request.json
-        account_id = data.get('account_id')
-        api_token = data.get('api_token')
-        symbol = data.get('symbol', 'EURUSD')
-        
-        global bot
-        bot = MetaAPITradingBot(
-            account_id=account_id,
-            api_token=api_token,
-            symbol=symbol
+def account_credentials(mode):
+    mode = mode.upper()
+
+    account_id = (
+        os.getenv("METAAPI_LIVE_ACCOUNT_ID")
+        if mode == "LIVE"
+        else os.getenv("METAAPI_DEMO_ACCOUNT_ID")
+    )
+
+    token = os.getenv("METAAPI_TOKEN")
+
+    if not token:
+        raise RuntimeError("METAAPI_TOKEN is missing")
+
+    if not account_id:
+        raise RuntimeError(
+            f"METAAPI_{mode}_ACCOUNT_ID is missing"
         )
-        
-        return jsonify({
-            'status': 'configured',
-            'account_id': account_id,
-            'symbol': symbol
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+
+    return token, account_id
 
 
-@app.route('/api/bot/start', methods=['POST'])
-def start_bot():
-    """Start the trading bot"""
-    global bot, bot_running, bot_thread
-    
-    if not bot:
-        return jsonify({'error': 'Bot not configured'}), 400
-    
-    if bot_running:
-        return jsonify({'error': 'Bot already running'}), 400
-    
-    try:
-        bot_running = True
-        
-        def run_bot():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(bot.run(interval=60))
-            finally:
-                loop.close()
-        
-        bot_thread = threading.Thread(target=run_bot, daemon=True)
-        bot_thread.start()
-        
-        logger.info("Bot started successfully")
-        return jsonify({'status': 'started'})
-    except Exception as e:
-        bot_running = False
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/bot/stop', methods=['POST'])
-def stop_bot():
-    """Stop the trading bot"""
-    global bot_running, bot
-    
-    if not bot_running:
-        return jsonify({'error': 'Bot not running'}), 400
-    
-    try:
-        bot_running = False
-        logger.info("Bot stop requested")
-        return jsonify({'status': 'stopped'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/bot/status', methods=['GET'])
-def bot_status():
-    """Get current bot status"""
-    global bot, bot_running
-    
-    if not bot:
-        return jsonify({'status': 'not_configured'})
-    
+@app.get("/api/health")
+def health():
     return jsonify({
-        'status': 'running' if bot_running else 'stopped',
-        'symbol': bot.symbol,
-        'position': bot.position,
-        'entry_price': bot.entry_price,
-        'stop_price': bot.stop_price,
-        'trade_count': bot.trade_count,
-        'timestamp': datetime.now().isoformat()
+        "status": "healthy",
+        "bot_running": bot_running(),
+        "mode": bot_mode,
+        "symbol": bot_symbol,
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
 
-@app.route('/api/positions', methods=['GET'])
-async def get_positions():
-    """Get current open positions"""
-    if not bot or not bot.connection:
-        return jsonify({'error': 'Bot not initialized'}), 400
-    
-    try:
-        positions = await bot.check_positions()
+@app.post("/api/config")
+def configure():
+    global bot_mode, bot_symbol
+
+    data = request.get_json(silent=True) or {}
+
+    mode = str(
+        data.get("mode", "DEMO")
+    ).upper()
+
+    symbol = str(
+        data.get("symbol", "XAUUSD")
+    ).upper()
+
+    if mode not in ("DEMO", "LIVE"):
         return jsonify({
-            'positions': positions,
-            'count': len(positions)
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            "error": "Mode must be DEMO or LIVE"
+        }), 400
 
-
-@app.route('/api/account/balance', methods=['GET'])
-async def get_balance():
-    """Get account balance and equity"""
-    if not bot or not bot.connection:
-        return jsonify({'error': 'Bot not initialized'}), 400
-    
-    try:
-        balance = await bot.get_account_balance()
-        return jsonify(balance)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/manual/close', methods=['POST'])
-async def manual_close_position():
-    """Manually close current position"""
-    if not bot or not bot.connection:
-        return jsonify({'error': 'Bot not initialized'}), 400
-    
-    try:
-        success = await bot.close_position()
+    if bot_running():
         return jsonify({
-            'status': 'closed' if success else 'no_position',
-            'success': success
-        })
+            "error": "Stop the bot before changing account"
+        }), 409
+
+    try:
+        account_credentials(mode)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            "error": str(e)
+        }), 400
+
+    bot_mode = mode
+    bot_symbol = symbol
+
+    return jsonify({
+        "status": "configured",
+        "mode": bot_mode,
+        "symbol": bot_symbol
+    })
 
 
-@socketio.on('connect')
-def handle_connect():
-    """Handle WebSocket connection"""
-    logger.info(f"Client connected: {request.sid}")
-    emit('response', {'data': 'Connected to bot API'})
+@app.post("/api/bot/start")
+def start_bot():
+    global bot_process
+
+    if bot_running():
+        return jsonify({
+            "error": "Bot already running"
+        }), 409
+
+    try:
+        token, account_id = account_credentials(bot_mode)
+    except Exception as e:
+        return jsonify({
+            "error": str(e)
+        }), 400
+
+    root = os.path.dirname(
+        os.path.dirname(__file__)
+    )
+
+    env = os.environ.copy()
+
+    env["METAAPI_TOKEN"] = token
+    env["METAAPI_ACCOUNT_ID"] = account_id
+    env["SYMBOL"] = bot_symbol
+    env["EXECUTE_ORDERS"] = "true"
+    env["PYTHONUNBUFFERED"] = "1"
+
+    runner = os.path.join(
+        root,
+        "backend",
+        "velocity_runner.py"
+    )
+
+    bot_process = subprocess.Popen(
+        [sys.executable, runner],
+        cwd=root,
+        env=env,
+        start_new_session=True
+    )
+
+    return jsonify({
+        "status": "started",
+        "mode": bot_mode,
+        "symbol": bot_symbol,
+        "pid": bot_process.pid
+    })
 
 
-@socketio.on('subscribe')
-def handle_subscribe(data):
-    """Subscribe to bot updates"""
-    room = data.get('room', 'bot_updates')
-    join_room(room)
-    emit('response', {'data': f'Subscribed to {room}'})
+@app.post("/api/bot/stop")
+def stop_bot():
+    global bot_process
+
+    if not bot_running():
+        bot_process = None
+
+        return jsonify({
+            "status": "stopped"
+        })
+
+    try:
+        os.killpg(
+            os.getpgid(bot_process.pid),
+            signal.SIGTERM
+        )
+    except Exception:
+        try:
+            bot_process.terminate()
+        except Exception:
+            pass
+
+    bot_process = None
+
+    return jsonify({
+        "status": "stopped"
+    })
 
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle WebSocket disconnection"""
-    logger.info(f"Client disconnected: {request.sid}")
+@app.get("/api/bot/status")
+def status():
+    return jsonify({
+        "status": "running" if bot_running() else "stopped",
+        "running": bot_running(),
+        "mode": bot_mode,
+        "symbol": bot_symbol,
+        "strategy": "FAST VELOCITY EXPANSION",
+        "exit": "OPPOSITE STOP TRAILS FAVORABLE PRICE",
+        "trailing_pips": 100,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
 
 
-def emit_bot_update(data):
-    """Emit bot update to connected clients"""
-    socketio.emit('bot_update', data, room='bot_updates')
+if __name__ == "__main__":
+    port = int(
+        os.getenv("PORT", "5000")
+    )
 
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    app.run(
+        host="127.0.0.1",
+        port=port,
+        debug=False
+    )
