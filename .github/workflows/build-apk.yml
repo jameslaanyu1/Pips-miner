@@ -3,9 +3,15 @@ name: Build Pips Miner APK
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+      - 'agent/**'
     paths:
       - "mobile_app/**"
       - ".github/workflows/build-apk.yml"
+
+permissions:
+  contents: read
 
 jobs:
   build-apk:
@@ -16,53 +22,47 @@ jobs:
         working-directory: mobile_app
 
     steps:
-      - name: Checkout Pips-miner
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.3"
           channel: stable
           cache: true
 
+      - name: Show Flutter version
+        run: flutter --version
+
       - name: Generate Android project
-        run: flutter create --platforms=android --project-name=pips_miner_app .
-
-      - name: Allow local backend HTTP
-        working-directory: .
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path(
-              "mobile_app/android/app/src/main/AndroidManifest.xml"
-          )
-
-          s = p.read_text()
-
-          if "android:usesCleartextTraffic" not in s:
-              s = s.replace(
-                  "<application ",
-                  '<application android:usesCleartextTraffic="true" ',
-                  1
-              )
-
-          p.write_text(s)
-          print("Enabled local HTTP for Termux backend")
-          PY
+          flutter create \
+            --platforms=android \
+            --project-name=pips_miner_app \
+            --org=com.pipsminer \
+            .
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Generate app icon
+      - name: Analyze application
+        run: flutter analyze
+
+      - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Upload APK
+      - name: Rename APK
+        working-directory: .
+        run: |
+          cp mobile_app/build/app/outputs/flutter-apk/app-release.apk \
+             Pips-Miner-release.apk
+
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: pips-miner-apk
-          path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+          name: Pips-Miner-release
+          path: Pips-Miner-release.apk
+          if-no-files-found: error
