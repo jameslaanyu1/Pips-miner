@@ -26,26 +26,17 @@ class MetaApiService {
   }
 
   Future<Map<String, dynamic>> accountInformation() async {
-    final response = await http.get(
-      _uri('/account-information'),
-      headers: _headers,
-    );
+    final response = await http.get(_uri('/account-information'), headers: _headers);
     return _map(response);
   }
 
   Future<List<dynamic>> positions() async {
-    final response = await http.get(
-      _uri('/positions'),
-      headers: _headers,
-    );
+    final response = await http.get(_uri('/positions'), headers: _headers);
     return _list(response);
   }
 
   Future<List<dynamic>> orders() async {
-    final response = await http.get(
-      _uri('/orders'),
-      headers: _headers,
-    );
+    final response = await http.get(_uri('/orders'), headers: _headers);
     return _list(response);
   }
 
@@ -78,27 +69,78 @@ class MetaApiService {
     return _list(response);
   }
 
+  Future<Map<String, dynamic>> marketOrder({
+    required String symbol,
+    required double volume,
+    required bool buy,
+    String? clientId,
+    int? magic,
+  }) async {
+    return _trade({
+      'action': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+      'symbol': symbol,
+      'volume': volume,
+      if (clientId != null) 'clientId': clientId,
+      if (magic != null) 'magic': magic,
+    });
+  }
+
+  Future<Map<String, dynamic>> stopOrder({
+    required String symbol,
+    required double volume,
+    required bool buy,
+    required double openPrice,
+    String? clientId,
+    int? magic,
+  }) async {
+    return _trade({
+      'action': buy ? 'ORDER_TYPE_BUY_STOP' : 'ORDER_TYPE_SELL_STOP',
+      'symbol': symbol,
+      'volume': volume,
+      'openPrice': openPrice,
+      if (clientId != null) 'clientId': clientId,
+      if (magic != null) 'magic': magic,
+    });
+  }
+
+  Future<Map<String, dynamic>> modifyOrder({
+    required String orderId,
+    required double openPrice,
+  }) async {
+    return _trade({
+      'action': 'ORDER_MODIFY',
+      'orderId': orderId,
+      'openPrice': openPrice,
+    });
+  }
+
+  Future<Map<String, dynamic>> closePosition(String positionId) async {
+    return _trade({
+      'action': 'POSITION_CLOSE_ID',
+      'positionId': positionId,
+    });
+  }
+
+  Future<Map<String, dynamic>> _trade(Map<String, dynamic> body) async {
+    final response = await http.post(
+      _uri('/trade'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    return _map(response);
+  }
+
   Map<String, dynamic> _map(http.Response response) {
     _check(response);
-
     final decoded = jsonDecode(response.body);
-
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
+    if (decoded is Map<String, dynamic>) return decoded;
     throw Exception('Unexpected MetaApi response');
   }
 
   List<dynamic> _list(http.Response response) {
     _check(response);
-
     final decoded = jsonDecode(response.body);
-
-    if (decoded is List) {
-      return decoded;
-    }
-
+    if (decoded is List) return decoded;
     throw Exception('Unexpected MetaApi list response');
   }
 

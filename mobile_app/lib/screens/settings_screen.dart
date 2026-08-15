@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pips_miner_app/providers/bot_provider.dart';
+import 'package:pips_miner_app/services/secure_storage_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -15,6 +16,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _apiTokenController;
   late TextEditingController _symbolController;
   late TextEditingController _volumeController;
+  late TextEditingController _hostController;
+  final SecureStorageService _storage = SecureStorageService();
 
   @override
   void initState() {
@@ -24,6 +27,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _apiTokenController = TextEditingController();
     _symbolController = TextEditingController();
     _volumeController = TextEditingController();
+    _hostController = TextEditingController(
+      text: 'https://mt-client-api-v1.london.agiliumtrade.ai',
+    );
+    _loadCredentials();
   }
 
   @override
@@ -33,7 +40,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _apiTokenController.dispose();
     _symbolController.dispose();
     _volumeController.dispose();
+    _hostController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadCredentials() async {
+    final token = await _storage.token();
+    final demo = await _storage.demoAccountId();
+    final live = await _storage.liveAccountId();
+    final host = await _storage.host();
+    if (!mounted) return;
+    setState(() {
+      _apiTokenController.text = token ?? '';
+      _demoAccountController.text = demo ?? '';
+      _liveAccountController.text = live ?? '';
+      if (host != null && host.isNotEmpty) _hostController.text = host;
+    });
   }
 
   @override
@@ -211,6 +233,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             prefixIcon: Icon(Icons.account_balance),
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _hostController,
+                          decoration: const InputDecoration(
+                            labelText: 'MetaApi Host',
+                            hintText: 'https://mt-client-api-v1.london.agiliumtrade.ai',
+                            prefixIcon: Icon(Icons.cloud),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -272,7 +303,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: const Text(
-                                '50 pips',
+                                '100 pips',
                                 style: TextStyle(fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -292,6 +323,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       botProvider.updateSettings(
                         symbol: _symbolController.text,
                         volume: double.tryParse(_volumeController.text) ?? 0.01,
+                      );
+                      _storage.saveCredentials(
+                        token: _apiTokenController.text.trim(),
+                        demoAccountId: _demoAccountController.text.trim(),
+                        liveAccountId: _liveAccountController.text.trim(),
+                        host: _hostController.text.trim(),
                       );
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(

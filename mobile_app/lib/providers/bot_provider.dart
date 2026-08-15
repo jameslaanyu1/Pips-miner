@@ -1,12 +1,19 @@
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+
+import '../models/trading_config.dart';
+import '../services/metaapi_service.dart';
+import '../services/secure_storage_service.dart';
+import '../services/velocity_reversal_engine.dart';
 
 class BotProvider extends ChangeNotifier {
+  BotProvider();
+
+  final SecureStorageService _storage = SecureStorageService();
+
   bool _isLiveAccount = false;
-  String? _symbol = 'XAUUSD';
-  double? _volume = 0.01;
+  String _symbol = 'XAUUSD';
+  double _volume = 0.01;
 
   bool _isBotRunning = false;
   bool _isConnected = false;
@@ -17,11 +24,12 @@ class BotProvider extends ChangeNotifier {
   int _totalTrades = 0;
   double _winRate = 0.0;
   double _profitLoss = 0.0;
-  double _balance = 10000.0;
+  double _balance = 0.0;
   double _priceChange = 0.0;
 
-  late String _apiUrl;
   Timer? _updateTimer;
+  MetaApiService? _api;
+  VelocityReversalEngine? _engine;
 
   bool get isLiveAccount => _isLiveAccount;
   bool get isBotRunning => _isBotRunning;
@@ -34,20 +42,12 @@ class BotProvider extends ChangeNotifier {
   double get profitLoss => _profitLoss;
   double get balance => _balance;
   double get priceChange => _priceChange;
-  String? get symbol => _symbol;
-  double? get volume => _volume;
-
+  String get symbol => _symbol;
+  double get volume => _volume;
   String get accountMode => _isLiveAccount ? 'LIVE' : 'DEMO';
-
-  BotProvider() {
-    // Android emulator -> host computer
-    // Change to your computer's LAN IP for a physical Android phone.
-    _apiUrl = 'http://10.0.2.2:5000/api';
-  }
 
   void setAccountMode(bool isLive) {
     if (_isBotRunning) return;
-
     _isLiveAccount = isLive;
     notifyListeners();
   }
@@ -57,121 +57,107 @@ class BotProvider extends ChangeNotifier {
     double? volume,
   }) {
     if (symbol != null && symbol.trim().isNotEmpty) {
-      _symbol = symbol.toUpperCase();
+      _symbol = symbol.trim().toUpperCase();
     }
-
     if (volume != null && volume > 0) {
       _volume = volume;
     }
-
     notifyListeners();
   }
 
   Future<void> connect() async {
     try {
-      final response = await http
-          .get(Uri.parse('$_apiUrl/health'))
-          .timeout(const Duration(seconds: 5));
+      final token = await _storage.token();
+      final accountId = _isLiveAccount
+          ? await _storage.liveAccountId()
+          : await _storage.demoAccountId();
+      final host = await _storage.host();
 
-      if (response.statusCode == 200) {
-        _isConnected = true;
-
-        final data = jsonDecode(response.body);
-
-        if (data['mode'] == 'LIVE') {
-          _isLiveAccount = true;
-        } else {
-          _isLiveAccount = false;
-        }
-
-        if (data['symbol'] != null) {
-          _symbol = data['symbol'];
-        }
-
-        _isBotRunning = data['bot_running'] == true;
-
-        notifyListeners();
-      } else {
+      if (token == null ||
+          token.isEmpty ||
+          accountId == null ||
+          accountId.isEmpty) {
         _isConnected = false;
         notifyListeners();
+        return;
       }
+
+      _api = MetaApiService(
+        token: token,
+        accountId: accountId,
+        host: (host == null || host.isEmpty)
+            ? 'https://mt-client-api-v1.london.agiliumtrade.ai'
+            : host,
+      );
+
+      await _api!.accountInformation();
+      _isConnected = true;
+      await _fetchBotStatus();
+      notifyListeners();
     } catch (e) {
       _isConnected = false;
-      debugPrint('Connection error: $e');
+      debugPrint('MetaApi connection error: $e');
       notifyListeners();
     }
   }
 
   Future<void> startBot() async {
     try {
-      if (!_isConnected) {
+      if (!_isConnected || _api == null) {
         await connect();
       }
 
-      if (!_isConnected) {
-        throw Exception('Backend is not connected');
+      if (!_isConnected || _api == null) {
+        throw Exception(
+          'MetaApi is not connected. Save the token and account ID first.',
+        );
       }
 
-      final configResponse = await http
-          .post(
-            Uri.parse('$_apiUrl/config'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'mode': accountMode,
-              'symbol': _symbol,
-            }),
-          )
-          .timeout(const Duration(seconds: 10));
+      final config = TradingConfig(
+        symbol: _symbol,
+        minimumVolume: _volume,
+        trailingPips: 100.0,
+        reversalPips: 100.0,
+        velocityBaselinePeriod: 14,
+        velocityExpansionThreshold: 1.5,
+      );
 
-      if (configResponse.statusCode != 200) {
-        final data = jsonDecode(configResponse.body);
-        throw Exception(data['error'] ?? 'Failed to configure bot');
-      }
+      _engine = VelocityReversalEngine(
+        api: _api!,
+        config: config,
+      );
 
-      final startResponse = await http
-          .post(Uri.parse('$_apiUrl/bot/start'))
-          .timeout(const Duration(seconds: 10));
-
-      if (startResponse.statusCode != 200) {
-        final data = jsonDecode(startResponse.body);
-        throw Exception(data['error'] ?? 'Failed to start bot');
-      }
-
+      await _engine!.start();
       _isBotRunning = true;
       _startUpdates();
       notifyListeners();
     } catch (e) {
-      debugPrint('Error starting bot: $e');
+      debugPrint('Error starting velocity engine: $e');
       rethrow;
     }
   }
 
   Future<void> stopBot() async {
-    try {
-      final response = await http
-          .post(Uri.parse('$_apiUrl/bot/stop'))
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        _isBotRunning = false;
-        _updateTimer?.cancel();
-        notifyListeners();
-      } else {
-        final data = jsonDecode(response.body);
-        throw Exception(data['error'] ?? 'Failed to stop bot');
-      }
-    } catch (e) {
-      debugPrint('Error stopping bot: $e');
-      rethrow;
-    }
+    _engine?.stop();
+    _engine = null;
+    _isBotRunning = false;
+    _updateTimer?.cancel();
+    await _fetchBotStatus();
+    notifyListeners();
   }
 
   void _startUpdates() {
     _updateTimer?.cancel();
-
     _updateTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      const Duration(seconds: 1),
       (_) async {
+        if (_engine != null) {
+          try {
+            await _engine!.tick();
+          } catch (e) {
+            debugPrint('Velocity engine tick error: $e');
+          }
+        }
         await _fetchBotStatus();
       },
     );
@@ -179,38 +165,47 @@ class BotProvider extends ChangeNotifier {
 
   Future<void> _fetchBotStatus() async {
     try {
-      final response = await http
-          .get(Uri.parse('$_apiUrl/bot/status'))
-          .timeout(const Duration(seconds: 5));
+      final api = _api;
+      if (api == null) return;
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+      final positions = await api.positions();
+      final strategy = positions.whereType<Map>().map(
+        (p) => Map<String, dynamic>.from(p),
+      ).where((p) => p['symbol']?.toString() == _symbol).toList();
 
-        _isBotRunning = data['running'] == true;
-        _currentPosition = data['position'];
-        _entryPrice = data['entry_price']?.toDouble();
-        _stopPrice = data['stop_price']?.toDouble();
-        _totalTrades = data['trade_count'] ?? 0;
-
-        if (data['mode'] == 'LIVE') {
-          _isLiveAccount = true;
-        } else {
-          _isLiveAccount = false;
-        }
-
-        if (data['symbol'] != null) {
-          _symbol = data['symbol'];
-        }
-
-        notifyListeners();
+      if (strategy.isNotEmpty) {
+        final p = strategy.first;
+        final type = p['type']?.toString() ?? '';
+        _currentPosition = type.contains('SELL') ? 'SELL' : 'BUY';
+        _entryPrice = _number(p['openPrice']);
+        _stopPrice = _engine?.reversalPrice;
+      } else {
+        _currentPosition = null;
+        _entryPrice = null;
+        _stopPrice = null;
       }
+
+      final info = await api.accountInformation();
+      _balance = _number(info['balance']) ?? _balance;
+      _profitLoss = _number(info['equity']) != null
+          ? (_number(info['equity'])! - _balance)
+          : _profitLoss;
+
+      _isBotRunning = _engine?.running ?? false;
     } catch (e) {
-      debugPrint('Error fetching status: $e');
+      debugPrint('Status error: $e');
     }
+    notifyListeners();
+  }
+
+  double? _number(dynamic value) {
+    if (value == null) return null;
+    return double.tryParse(value.toString());
   }
 
   @override
   void dispose() {
+    _engine?.stop();
     _updateTimer?.cancel();
     super.dispose();
   }
