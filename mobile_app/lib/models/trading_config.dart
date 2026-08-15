@@ -5,6 +5,10 @@ class TradingConfig {
   final int velocityBaselinePeriod;
   final double velocityExpansionThreshold;
 
+  // Volume confirmation follows velocity expansion.
+  final int volumeBaselinePeriod;
+  final double volumeExpansionThreshold;
+
   // Agreed position-management distance.
   final double trailingPips;
 
@@ -24,6 +28,10 @@ class TradingConfig {
 
     this.velocityBaselinePeriod = 14,
     this.velocityExpansionThreshold = 1.5,
+
+    // M1 volume confirmation.
+    this.volumeBaselinePeriod = 14,
+    this.volumeExpansionThreshold = 1.5,
 
     // AGREED: 100 pips.
     this.trailingPips = 100.0,

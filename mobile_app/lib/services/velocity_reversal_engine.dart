@@ -195,6 +195,10 @@ class VelocityReversalEngine {
       baselinePeriod: config.velocityBaselinePeriod,
       expansionThreshold:
           config.velocityExpansionThreshold,
+      volumeBaselinePeriod:
+          config.volumeBaselinePeriod,
+      volumeExpansionThreshold:
+          config.volumeExpansionThreshold,
     );
 
     if (!signal.expanded) return;
