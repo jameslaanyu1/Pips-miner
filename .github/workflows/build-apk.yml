@@ -38,7 +38,7 @@ jobs:
         run: |
           flutter create \
             --platforms=android \
-            --project-name=pips_miner_app \
+            --project-name=pips_miner \
             --org=com.pipsminer \
             .
 
