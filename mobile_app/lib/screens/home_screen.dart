@@ -79,6 +79,44 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             // Live/Demo Account Switcher
             const AccountSwitcher(),
+            const SizedBox(height: 12),
+
+            Consumer<BotProvider>(
+              builder: (context, botProvider, _) {
+                if (botProvider.isConnected ||
+                    botProvider.connectionError == null) {
+                  return const SizedBox.shrink();
+                }
+
+                return Card(
+                  color: Colors.red.withOpacity(0.10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            botProvider.connectionError!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => botProvider.connect(),
+                          child: const Text('RETRY'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
             const SizedBox(height: 20),
 
             // Bot Status Card
