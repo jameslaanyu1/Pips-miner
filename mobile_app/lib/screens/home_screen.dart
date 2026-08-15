@@ -26,7 +26,23 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PIPS Miner Bot'),
+        title: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Pip-life',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            Text(
+              'life changing pips',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
         elevation: 0,
         actions: [
           Padding(

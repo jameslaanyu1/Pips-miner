@@ -11,7 +11,9 @@ class TradingConfig {
   // Reversal stop distance.
   final double reversalPips;
 
-  // Position sizing.
+  // Automatic position sizing.
+  // Each bot calculates size from its own account balance and
+  // the live broker specification for the selected symbol.
   final double riskPercent;
   final double minimumVolume;
   final double volumeStep;

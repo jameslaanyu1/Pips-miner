@@ -128,6 +128,25 @@ class MetaApiService {
     });
   }
 
+  Future<Map<String, dynamic>> calculateMargin({
+    required String symbol,
+    required double volume,
+    required bool buy,
+    required double openPrice,
+  }) async {
+    final response = await http.post(
+      _uri('/calculate-margin'),
+      headers: _headers,
+      body: jsonEncode({
+        'symbol': symbol,
+        'type': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+        'volume': volume,
+        'openPrice': openPrice,
+      }),
+    );
+    return _map(response);
+  }
+
   Future<Map<String, dynamic>> _trade(Map<String, dynamic> body) async {
     final response = await http.post(
       _uri('/trade'),

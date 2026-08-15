@@ -206,6 +206,13 @@ class VelocityReversalEngine {
     final buy =
         signal.direction == VelocityDirection.bullish;
 
+    // Calculate this bot's position size from its own live account
+    // balance and this broker's live symbol requirements. Never use
+    // a shared/global lot size.
+    _activeVolume = await _calculatePositionVolume(
+      buy: buy,
+    );
+
     final clientId =
         '${_clientPrefix}_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -259,6 +266,192 @@ class VelocityReversalEngine {
       'MetaApi market order succeeded but the new position '
       'was not visible after several terminal-state checks.',
     );
+  }
+
+  Future<double> _calculatePositionVolume({
+    required bool buy,
+  }) async {
+    final account = await api.accountInformation();
+    final specification = await api.symbolSpecification(config.symbol);
+    final price = await api.symbolPrice(config.symbol);
+
+    final balance = _number(account['balance']);
+    final freeMargin = _number(account['freeMargin']);
+
+    if (balance == null || balance <= 0) {
+      throw Exception(
+        'Cannot calculate position size: MetaApi returned no valid account balance.',
+      );
+    }
+
+    if (freeMargin == null || freeMargin <= 0) {
+      throw Exception(
+        'Cannot calculate position size: account free margin is zero or unavailable.',
+      );
+    }
+
+    final minVolume = _number(
+          specification['minVolume'] ?? specification['volumeMin'],
+        ) ??
+        config.minimumVolume;
+
+    final maxVolume = _number(
+          specification['maxVolume'] ?? specification['volumeMax'],
+        ) ??
+        config.maximumVolume;
+
+    final volumeStep = _number(
+          specification['volumeStep'],
+        ) ??
+        config.volumeStep;
+
+    final tickSize = _number(
+      specification['tickSize'],
+    );
+
+    final profitTickValue = _number(
+      price['profitTickValue'],
+    );
+
+    final lossTickValue = _number(
+      price['lossTickValue'],
+    ) ?? profitTickValue;
+
+    final bid = _number(
+      price['bid'] ?? price['Bid'] ?? price['last'],
+    );
+    final ask = _number(
+      price['ask'] ?? price['Ask'] ?? price['last'],
+    );
+
+    if (minVolume == null ||
+        maxVolume == null ||
+        volumeStep == null ||
+        minVolume <= 0 ||
+        maxVolume < minVolume ||
+        volumeStep <= 0) {
+      throw Exception(
+        'Broker returned invalid volume minimum/maximum/step for ${config.symbol}.',
+      );
+    }
+
+    if (tickSize == null ||
+        tickSize <= 0 ||
+        lossTickValue == null ||
+        lossTickValue <= 0) {
+      throw Exception(
+        'MetaApi did not return valid tick sizing data for ${config.symbol}.',
+      );
+    }
+
+    if (bid == null || ask == null) {
+      throw Exception(
+        'MetaApi did not return a valid bid/ask for ${config.symbol}.',
+      );
+    }
+
+    final riskAmount = balance * (config.riskPercent / 100.0);
+    final pipSize = await _pipSizeFromSpecification(specification);
+    final stopDistance = config.reversalPips * pipSize;
+
+    final ticksToStop = stopDistance / tickSize;
+    final lossPerLot = ticksToStop * lossTickValue;
+
+    if (lossPerLot <= 0) {
+      throw Exception(
+        'Cannot calculate loss-per-lot for ${config.symbol}.',
+      );
+    }
+
+    // 1% of THIS account's current balance is the target risk.
+    var desiredVolume = riskAmount / lossPerLot;
+
+    // Apply the broker's live min/max first.
+    desiredVolume = desiredVolume.clamp(minVolume, maxVolume);
+
+    // Round DOWN to the broker's step so risk is never increased by rounding.
+    desiredVolume = _floorToStep(desiredVolume, volumeStep);
+
+    if (desiredVolume < minVolume) {
+      desiredVolume = minVolume;
+    }
+
+    // Keep the new order within the project's 50% free-margin cap.
+    final marginBudget = freeMargin * 0.50;
+    final openPrice = buy ? ask : bid;
+
+    var margin = await api.calculateMargin(
+      symbol: config.symbol,
+      volume: desiredVolume,
+      buy: buy,
+      openPrice: _normalizePrice(openPrice),
+    );
+
+    var requiredMargin = _number(margin['margin']);
+
+    if (requiredMargin != null && requiredMargin > marginBudget) {
+      final scale = marginBudget / requiredMargin;
+      desiredVolume = _floorToStep(
+        desiredVolume * scale,
+        volumeStep,
+      );
+
+      if (desiredVolume < minVolume) {
+        throw Exception(
+          'Broker minimum volume for ${config.symbol} would exceed the 50% free-margin safety cap.',
+        );
+      }
+
+      margin = await api.calculateMargin(
+        symbol: config.symbol,
+        volume: desiredVolume,
+        buy: buy,
+        openPrice: _normalizePrice(openPrice),
+      );
+      requiredMargin = _number(margin['margin']);
+
+      if (requiredMargin != null && requiredMargin > marginBudget) {
+        throw Exception(
+          'Calculated ${config.symbol} position still exceeds the 50% free-margin safety cap.',
+        );
+      }
+    }
+
+    return double.parse(
+      desiredVolume.toStringAsFixed(8),
+    );
+  }
+
+  double _floorToStep(double value, double step) {
+    if (step <= 0) return value;
+    final units = (value / step).floor();
+    return units * step;
+  }
+
+  Future<double> _pipSizeFromSpecification(
+    Map<String, dynamic> specification,
+  ) async {
+    final explicitPipSize = _number(specification['pipSize']);
+
+    if (explicitPipSize != null && explicitPipSize > 0) {
+      return explicitPipSize;
+    }
+
+    final point = _number(specification['point']);
+    final digits = int.tryParse(
+          specification['digits']?.toString() ?? '',
+        ) ??
+        0;
+
+    if (point == null || point <= 0) {
+      throw Exception(
+        'MetaApi symbol specification has no valid point size.',
+      );
+    }
+
+    return (digits == 3 || digits == 5)
+        ? point * 10
+        : point;
   }
 
   Future<void> _createReversalStop(
@@ -496,32 +689,7 @@ class VelocityReversalEngine {
     final specification =
         await api.symbolSpecification(config.symbol);
 
-    final point = _number(
-      specification['point'],
-    );
-
-    final digits =
-        int.tryParse(
-          specification['digits']?.toString() ?? '',
-        ) ??
-        0;
-
-    if (point == null || point <= 0) {
-      throw Exception(
-        'MetaApi symbol specification has no valid point size.',
-      );
-    }
-
-    /*
-     * Standard FX convention:
-     * 5/3 digit symbols use 10 points per pip.
-     * 2/4 digit symbols use 1 point per pip.
-     *
-     * This also avoids hard-coding XAUUSD price precision.
-     */
-    return (digits == 3 || digits == 5)
-        ? point * 10
-        : point;
+    return _pipSizeFromSpecification(specification);
   }
 
   double _normalizePrice(double price) {

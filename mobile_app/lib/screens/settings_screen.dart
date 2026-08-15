@@ -15,7 +15,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _liveAccountController;
   late TextEditingController _apiTokenController;
   late TextEditingController _symbolController;
-  late TextEditingController _volumeController;
   late TextEditingController _hostController;
   final SecureStorageService _storage = SecureStorageService();
 
@@ -26,7 +25,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _liveAccountController = TextEditingController();
     _apiTokenController = TextEditingController();
     _symbolController = TextEditingController();
-    _volumeController = TextEditingController();
     _hostController = TextEditingController(
       text: 'https://mt-client-api-v1.london.agiliumtrade.ai',
     );
@@ -39,7 +37,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _liveAccountController.dispose();
     _apiTokenController.dispose();
     _symbolController.dispose();
-    _volumeController.dispose();
     _hostController.dispose();
     super.dispose();
   }
@@ -272,16 +269,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          controller: _volumeController,
-                          decoration: const InputDecoration(
-                            labelText: 'Trade Volume',
-                            hintText: 'e.g., 0.01, 0.1, 1.0',
-                            prefixIcon: Icon(Icons.balance),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                            decimal: true,
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.auto_graph, color: Colors.green),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Automatic position sizing: 1% of the current account balance per new position. The broker\'s live minimum volume, maximum volume and volume step are applied separately for each symbol. Margin is checked before the order is sent.',
+                                  style: TextStyle(fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -322,7 +327,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: () {
                       botProvider.updateSettings(
                         symbol: _symbolController.text,
-                        volume: double.tryParse(_volumeController.text) ?? 0.01,
                       );
                       _storage.saveCredentials(
                         token: _apiTokenController.text.trim(),

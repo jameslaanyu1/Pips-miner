@@ -13,7 +13,6 @@ class BotProvider extends ChangeNotifier {
 
   bool _isLiveAccount = false;
   String _symbol = 'XAUUSD';
-  double _volume = 0.01;
 
   bool _isBotRunning = false;
   bool _isConnected = false;
@@ -43,7 +42,6 @@ class BotProvider extends ChangeNotifier {
   double get balance => _balance;
   double get priceChange => _priceChange;
   String get symbol => _symbol;
-  double get volume => _volume;
   String get accountMode => _isLiveAccount ? 'LIVE' : 'DEMO';
 
   void setAccountMode(bool isLive) {
@@ -54,13 +52,9 @@ class BotProvider extends ChangeNotifier {
 
   void updateSettings({
     String? symbol,
-    double? volume,
   }) {
     if (symbol != null && symbol.trim().isNotEmpty) {
       _symbol = symbol.trim().toUpperCase();
-    }
-    if (volume != null && volume > 0) {
-      _volume = volume;
     }
     notifyListeners();
   }
@@ -115,7 +109,6 @@ class BotProvider extends ChangeNotifier {
 
       final config = TradingConfig(
         symbol: _symbol,
-        minimumVolume: _volume,
         trailingPips: 100.0,
         reversalPips: 100.0,
         velocityBaselinePeriod: 14,
