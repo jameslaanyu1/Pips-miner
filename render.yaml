@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: pips-miner-backend
+    runtime: docker
+    plan: starter
+    branch: agent/pips-miner-rebuild
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: METAAPI_TOKEN
+        sync: false
+      - key: PIPSMINER_SESSION_SECRET
+        generateValue: true
+      - key: METAAPI_PROVISIONING_URL
+        value: https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai
+      - key: METAAPI_CLIENT_URL
+        value: https://mt-client-api-v1.london.agiliumtrade.ai
+      - key: PIPSMINER_MAGIC
+        value: "26081501"
+      - key: SESSION_TTL_SECONDS
+        value: "86400"

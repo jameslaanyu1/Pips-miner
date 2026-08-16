@@ -8,14 +8,9 @@ services:
       METAAPI_PROVISIONING_URL: ${METAAPI_PROVISIONING_URL:-https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai}
       METAAPI_CLIENT_URL: ${METAAPI_CLIENT_URL:-https://mt-client-api-v1.london.agiliumtrade.ai}
       PIPSMINER_MAGIC: ${PIPSMINER_MAGIC:-26081501}
+      PIPSMINER_SESSION_SECRET: ${PIPSMINER_SESSION_SECRET}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-86400}
       PORT: 5000
     volumes:
       - ./data:/app/data
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
     restart: unless-stopped
