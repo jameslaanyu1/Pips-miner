@@ -153,6 +153,7 @@ def update_existing_credentials(account_id, login, password, server):
         )
 
 def create_metaapi_account(login, password, server, platform):
+    # Lookup-only: the administrator's MetaApi account is provisioned first.
     existing = find_existing_account(login, server, platform)
 
     if existing:
@@ -160,66 +161,14 @@ def create_metaapi_account(login, password, server, platform):
         if not account_id:
             raise RuntimeError("MetaApi returned an account without an ID.")
 
-        # Reconfigure the existing cloud account instead of creating duplicates.
+        # Password is sent only to MetaApi to refresh the existing account
+        # credentials; Pips-Miner does not persist the MT5 password.
         update_existing_credentials(account_id, login, password, server)
         return account_id, "reused"
 
-    transaction_id = uuid.uuid4().hex[:32]
-    payload = {
-        "login": login,
-        "password": password,
-        "name": f"Pips-Miner-{login}",
-        "server": server,
-        "platform": platform,
-        "magic": MAGIC,
-        "type": "cloud-g2",
-        "reliability": "high",
-        "quoteStreamingIntervalInSeconds": 0,
-        "tags": ["pips-miner"],
-    }
-
-    response = meta_raw(
-        "POST",
-        METAAPI_PROVISIONING_URL,
-        "/users/current/accounts",
-        transaction_id=transaction_id,
-        json=payload,
-    )
-
-    if response.status_code in (200, 201):
-        data = response_body(response)
-        account_id = str(data.get("id") or data.get("_id") or "").strip()
-        if not account_id:
-            raise RuntimeError("MetaApi did not return an account ID.")
-        return account_id, "created"
-
-    if response.status_code == 202:
-        # Do NOT repeat the POST: that can create duplicate accounts.
-        # Instead wait for the account to appear in the account list.
-        deadline = time.time() + CONNECT_LIMIT_SECONDS
-        while time.time() < deadline:
-            time.sleep(5)
-            existing = find_existing_account(login, server, platform)
-            if existing:
-                account_id = str(
-                    existing.get("_id") or existing.get("id") or ""
-                ).strip()
-                if account_id:
-                    return account_id, "created"
-
-        raise RuntimeError(
-            "MetaApi accepted account provisioning, but the account is not "
-            "visible yet. Wait a little and press CONNECT MT5 again."
-        )
-
-    body = response_body(response)
-    if isinstance(body, dict):
-        message = body.get("message") or body.get("error") or str(body)
-    else:
-        message = str(body)
-
     raise RuntimeError(
-        f"MetaApi provisioning failed ({response.status_code}): {message}"
+        "This MT5 account is not registered in the administrator MetaApi account. "
+        "Ask the administrator to provision and deploy it first."
     )
 
 def deploy_metaapi_account(account_id):

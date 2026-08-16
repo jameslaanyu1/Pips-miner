@@ -146,9 +146,15 @@ class BotProvider extends ChangeNotifier {
         throw Exception('Backend did not return a valid session.');
       }
 
+      final accountId = decoded['accountId']?.toString().trim() ?? '';
+      if (accountId.isEmpty) {
+        throw Exception('Backend did not return the MetaApi account ID.');
+      }
+
       await _storage.saveConnection(
         sessionToken: decoded['sessionToken'].toString(),
         backendUrl: backendUrl.trim(),
+        accountId: accountId,
         login: login.trim(),
         server: server.trim(),
         platform: 'mt5',

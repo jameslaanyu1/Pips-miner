@@ -27,7 +27,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loginController = TextEditingController();
     _serverController = TextEditingController();
     _passwordController = TextEditingController();
-    _backendController = TextEditingController();
+    _backendController = TextEditingController(
+      text: const String.fromEnvironment(
+        'PIPSMINER_BACKEND_URL',
+        defaultValue: 'https://YOUR-PIPSMINER-BACKEND.example',
+      ),
+    );
     _symbolController = TextEditingController(text: 'XAUUSD');
 
     _loadConnection();
@@ -70,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Enter the backend, MT5 account number, broker server and password.',
+            'Enter your MT5 account number, broker server and trading password.',
           ),
         ),
       );
@@ -164,13 +169,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                         const SizedBox(height: 16),
 
-                        TextField(
-                          controller: _backendController,
-                          decoration: const InputDecoration(
-                            labelText: 'Pips-Miner Backend',
-                            hintText: 'https://your-pips-miner-api.example',
-                            prefixIcon: Icon(Icons.cloud),
-                          ),
+                        const Text(
+                          'Pips-Miner checks this MT5 account against the administrator MetaApi account. '
+                          'The app never asks for the MetaApi master key.',
+                          style: TextStyle(fontWeight: FontWeight.w500),
                         ),
 
                         const SizedBox(height: 16),
