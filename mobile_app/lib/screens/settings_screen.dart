@@ -17,7 +17,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _loginController;
   late final TextEditingController _serverController;
   late final TextEditingController _passwordController;
-  late final TextEditingController _backendController;
   late final TextEditingController _symbolController;
 
   @override
@@ -27,12 +26,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loginController = TextEditingController();
     _serverController = TextEditingController();
     _passwordController = TextEditingController();
-    _backendController = TextEditingController(
-      text: const String.fromEnvironment(
-        'PIPSMINER_BACKEND_URL',
-        defaultValue: 'https://YOUR-PIPSMINER-BACKEND.example',
-      ),
-    );
     _symbolController = TextEditingController(text: 'XAUUSD');
 
     _loadConnection();
@@ -43,7 +36,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loginController.dispose();
     _serverController.dispose();
     _passwordController.dispose();
-    _backendController.dispose();
     _symbolController.dispose();
     super.dispose();
   }
@@ -126,7 +118,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          'Enter your MT5 broker details. Your MetaApi credentials are managed by the Pips-Miner backend.',
+                          'Enter your MT5 broker details. Pips-Miner connects directly to your MetaApi account.',
                         ),
                         const SizedBox(height: 16),
 
@@ -164,8 +156,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 16),
 
                         const Text(
-                          'Pips-Miner checks this MT5 account against the administrator MetaApi account. '
-                          'The app never asks for the MetaApi master key.',
+                          'Pips-Miner securely uses the MetaApi credentials stored for this app. '
+                          'You only need to provide your MT5 account number, broker server and trading password.',
                           style: TextStyle(fontWeight: FontWeight.w500),
                         ),
 
