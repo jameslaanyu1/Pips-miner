@@ -235,7 +235,9 @@ class BotProvider extends ChangeNotifier {
 
       _api = api;
 
-      await api.accountInformation();
+      // Deployment can finish before the MetaApi trading terminal/API
+      // becomes ready. Wait instead of failing immediately.
+      await api.waitUntilReady();
 
       await _storage.saveMt5Connection(
         login: login.trim(),
@@ -295,6 +297,11 @@ class BotProvider extends ChangeNotifier {
     }
 
     _engineError = null;
+
+    // Do not start the Android trading service until MetaApi is actually
+    // ready. This prevents engine.start() from immediately failing when
+    // deployment is still coming online.
+    await _api!.waitUntilReady();
 
     final service = FlutterBackgroundService();
     final alreadyRunning = await service.isRunning();

@@ -39,6 +39,62 @@ class MetaApiService {
     return _map(response);
   }
 
+  Future<Map<String, dynamic>> waitUntilReady({
+    Duration timeout = const Duration(seconds: 60),
+    Duration pollInterval = const Duration(seconds: 2),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    Object? lastError;
+
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final status = await account();
+        final state = status['state']?.toString().toUpperCase();
+
+        if (state == 'UNDEPLOYED') {
+          throw Exception(
+            'MetaApi account is not deployed. Deploy the MT5 account first.',
+          );
+        }
+
+        if (state == 'DEPLOY_FAILED' ||
+            state == 'UNDEPLOY_FAILED' ||
+            state == 'REDEPLOY_FAILED') {
+          throw Exception(
+            'MetaApi account deployment failed (state: $state).',
+          );
+        }
+
+        if (state == 'DEPLOYED') {
+          try {
+            // The client API is the authoritative readiness check.
+            return await accountInformation();
+          } catch (e) {
+            lastError = e;
+          }
+        } else {
+          lastError = Exception(
+            'MetaApi account is still starting (state: ${state ?? 'UNKNOWN'}).',
+          );
+        }
+      } catch (e) {
+        if (e.toString().contains('is not deployed') ||
+            e.toString().contains('deployment failed')) {
+          rethrow;
+        }
+        lastError = e;
+      }
+
+      await Future<void>.delayed(pollInterval);
+    }
+
+    throw Exception(
+      'MetaApi account did not become ready within '
+      '${timeout.inSeconds} seconds.'
+      '${lastError == null ? '' : ' Last error: $lastError'}',
+    );
+  }
+
   Future<List<dynamic>> accounts() async {
     final response = await http.get(
       _provisioning('/users/current/accounts'),

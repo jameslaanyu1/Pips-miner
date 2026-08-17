@@ -116,6 +116,9 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
   });
 
   try {
+    // The foreground isolate must also verify MetaApi readiness because
+    // Android can start this service independently of the dashboard.
+    await api.waitUntilReady();
     await engine.start();
 
     if (service is AndroidServiceInstance) {
