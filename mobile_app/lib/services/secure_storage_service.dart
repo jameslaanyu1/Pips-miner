@@ -1,43 +1,80 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SecureStorageService {
-  static const _storage = FlutterSecureStorage();
-  static const _sessionTokenKey = 'pipsminer_session_token';
-  static const _backendUrlKey = 'pipsminer_backend_url';
-  static const _accountIdKey = 'metaapi_account_id';
-  static const _loginKey = 'mt5_login';
-  static const _serverKey = 'mt5_server';
-  static const _platformKey = 'mt5_platform';
+  static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
-  Future<void> saveConnection({
-    required String sessionToken,
-    required String backendUrl,
+  static const String _metaApiTokenKey = 'metaapi_api_token';
+  static const String _metaApiAccountIdKey = 'metaapi_account_id';
+
+  static const String _mt5LoginKey = 'mt5_login';
+  static const String _mt5ServerKey = 'mt5_server';
+
+  Future<void> saveMetaApiCredentials({
+    required String token,
     required String accountId,
-    required String login,
-    required String server,
-    required String platform,
   }) async {
-    await _storage.write(key: _sessionTokenKey, value: sessionToken);
-    await _storage.write(key: _backendUrlKey, value: backendUrl);
-    await _storage.write(key: _accountIdKey, value: accountId);
-    await _storage.write(key: _loginKey, value: login);
-    await _storage.write(key: _serverKey, value: server);
-    await _storage.write(key: _platformKey, value: platform);
+    await _storage.write(
+      key: _metaApiTokenKey,
+      value: token.trim(),
+    );
+    await _storage.write(
+      key: _metaApiAccountIdKey,
+      value: accountId.trim(),
+    );
   }
 
-  Future<String?> sessionToken() => _storage.read(key: _sessionTokenKey);
-  Future<String?> backendUrl() => _storage.read(key: _backendUrlKey);
-  Future<String?> accountId() => _storage.read(key: _accountIdKey);
-  Future<String?> login() => _storage.read(key: _loginKey);
-  Future<String?> server() => _storage.read(key: _serverKey);
-  Future<String?> platform() => _storage.read(key: _platformKey);
+  Future<String?> getMetaApiToken() async {
+    return _storage.read(key: _metaApiTokenKey);
+  }
 
-  Future<void> clear() async {
-    await _storage.delete(key: _sessionTokenKey);
-    await _storage.delete(key: _backendUrlKey);
-    await _storage.delete(key: _accountIdKey);
-    await _storage.delete(key: _loginKey);
-    await _storage.delete(key: _serverKey);
-    await _storage.delete(key: _platformKey);
+  Future<String?> getMetaApiAccountId() async {
+    return _storage.read(key: _metaApiAccountIdKey);
+  }
+
+  Future<bool> hasMetaApiCredentials() async {
+    final token = await getMetaApiToken();
+    final accountId = await getMetaApiAccountId();
+
+    return token != null &&
+        token.trim().isNotEmpty &&
+        accountId != null &&
+        accountId.trim().isNotEmpty;
+  }
+
+  Future<void> saveMt5Connection({
+    required String login,
+    required String server,
+  }) async {
+    await _storage.write(
+      key: _mt5LoginKey,
+      value: login.trim(),
+    );
+
+    await _storage.write(
+      key: _mt5ServerKey,
+      value: server.trim(),
+    );
+  }
+
+  Future<String?> getMt5Login() async {
+    return _storage.read(key: _mt5LoginKey);
+  }
+
+  Future<String?> getMt5Server() async {
+    return _storage.read(key: _mt5ServerKey);
+  }
+
+  Future<void> clearMt5Connection() async {
+    await _storage.delete(key: _mt5LoginKey);
+    await _storage.delete(key: _mt5ServerKey);
+  }
+
+  Future<void> clearMetaApiCredentials() async {
+    await _storage.delete(key: _metaApiTokenKey);
+    await _storage.delete(key: _metaApiAccountIdKey);
+  }
+
+  Future<void> clearAll() async {
+    await _storage.deleteAll();
   }
 }
