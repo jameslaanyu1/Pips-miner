@@ -39,6 +39,15 @@ class MetaApiService {
     return _map(response);
   }
 
+  Future<List<dynamic>> accounts() async {
+    final response = await http.get(
+      _provisioning('/users/current/accounts'),
+      headers: _headers,
+    );
+
+    return _list(response);
+  }
+
   Future<Map<String, dynamic>> configureCredentials({
     required String login,
     required String password,

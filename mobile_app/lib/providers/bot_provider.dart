@@ -128,36 +128,62 @@ class BotProvider extends ChangeNotifier {
         accountId: accountId.trim(),
       );
 
-      final account = await provisioning.account();
+      // Resolve the MetaApi account from the token + MT5 credentials.
+      // This prevents a stale/mismatched stored account ID from causing
+      // "Configuration token does not match the account id".
+      final accounts = await provisioning.accounts();
 
-      final expectedServer =
-          account['server']?.toString().trim() ?? '';
-      final expectedLogin =
-          account['login']?.toString().trim() ?? '';
+      final requestedLogin = login.trim();
+      final requestedServer = server.trim();
 
-      if (expectedServer.isNotEmpty &&
-          expectedServer.toLowerCase() !=
-              server.trim().toLowerCase()) {
+      Map<String, dynamic>? matchedAccount;
+
+      for (final item in accounts) {
+        if (item is! Map) continue;
+
+        final candidate = Map<String, dynamic>.from(item);
+        final candidateLogin =
+            candidate['login']?.toString().trim() ?? '';
+        final candidateServer =
+            candidate['server']?.toString().trim() ?? '';
+
+        if (candidateLogin == requestedLogin &&
+            candidateServer.toLowerCase() ==
+                requestedServer.toLowerCase()) {
+          matchedAccount = candidate;
+          break;
+        }
+      }
+
+      if (matchedAccount == null) {
         throw Exception(
-          'Broker server does not match the MetaApi account. '
-          'Expected: $expectedServer',
+          'No MetaApi account matches MT5 account '
+          '$requestedLogin on server $requestedServer.',
         );
       }
 
-      if (expectedLogin.isNotEmpty &&
-          expectedLogin != login.trim()) {
+      final resolvedAccountId =
+          matchedAccount['id']?.toString().trim() ?? '';
+
+      if (resolvedAccountId.isEmpty) {
         throw Exception(
-          'MT5 account number does not match the MetaApi account.',
+          'MetaApi returned the matching account without an account ID.',
         );
       }
 
       final region =
-          account['region']?.toString().trim() ?? 'new-york';
+          matchedAccount['region']?.toString().trim() ?? 'new-york';
 
       final api = MetaApiService(
         token: token.trim(),
-        accountId: accountId.trim(),
+        accountId: resolvedAccountId,
         region: region.isEmpty ? 'new-york' : region,
+      );
+
+      // Persist the account ID that actually belongs to this token.
+      await _storage.saveMetaApiCredentials(
+        token: token.trim(),
+        accountId: resolvedAccountId,
       );
 
       await api.configureCredentials(
