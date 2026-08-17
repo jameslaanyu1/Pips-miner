@@ -19,6 +19,7 @@ class BotProvider extends ChangeNotifier {
   bool _isBotRunning = false;
   bool _isConnected = false;
   String? _connectionError;
+  String? _engineError;
   String? _currentPosition;
   double? _entryPrice;
   double? _stopPrice;
@@ -37,6 +38,7 @@ class BotProvider extends ChangeNotifier {
   bool get isBotRunning => _isBotRunning;
   bool get isConnected => _isConnected;
   String? get connectionError => _connectionError;
+  String? get engineError => _engineError;
   String? get currentPosition => _currentPosition;
   double? get entryPrice => _entryPrice;
   double? get stopPrice => _stopPrice;
@@ -76,16 +78,12 @@ class BotProvider extends ChangeNotifier {
           accountId == null ||
           accountId.trim().isEmpty) {
         _isConnected = false;
-        _connectionError =
-            'MetaApi credentials are not configured.';
+        _connectionError = 'MetaApi credentials are not configured.';
         notifyListeners();
         return;
       }
 
-      _api = MetaApiService(
-        token: token.trim(),
-        accountId: accountId.trim(),
-      );
+      _api = MetaApiService(token: token.trim(), accountId: accountId.trim());
 
       await _api!.accountInformation();
 
@@ -142,14 +140,11 @@ class BotProvider extends ChangeNotifier {
         if (item is! Map) continue;
 
         final candidate = Map<String, dynamic>.from(item);
-        final candidateLogin =
-            candidate['login']?.toString().trim() ?? '';
-        final candidateServer =
-            candidate['server']?.toString().trim() ?? '';
+        final candidateLogin = candidate['login']?.toString().trim() ?? '';
+        final candidateServer = candidate['server']?.toString().trim() ?? '';
 
         if (candidateLogin == requestedLogin &&
-            candidateServer.toLowerCase() ==
-                requestedServer.toLowerCase()) {
+            candidateServer.toLowerCase() == requestedServer.toLowerCase()) {
           matchedAccount = candidate;
           break;
         }
@@ -163,9 +158,8 @@ class BotProvider extends ChangeNotifier {
       }
 
       final resolvedAccountId =
-          (matchedAccount['_id'] ?? matchedAccount['id'])
-              ?.toString()
-              .trim() ?? '';
+          (matchedAccount['_id'] ?? matchedAccount['id'])?.toString().trim() ??
+          '';
 
       if (resolvedAccountId.isEmpty) {
         throw Exception(
@@ -173,8 +167,7 @@ class BotProvider extends ChangeNotifier {
         );
       }
 
-      final region =
-          matchedAccount['region']?.toString().trim() ?? 'new-york';
+      final region = matchedAccount['region']?.toString().trim() ?? 'new-york';
 
       final api = MetaApiService(
         token: token.trim(),
@@ -188,10 +181,7 @@ class BotProvider extends ChangeNotifier {
         accountId: resolvedAccountId,
       );
 
-      await api.configureCredentials(
-        login: login.trim(),
-        password: password,
-      );
+      await api.configureCredentials(login: login.trim(), password: password);
 
       await api.deploy();
 
@@ -213,8 +203,7 @@ class BotProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _isConnected = false;
-      _connectionError =
-          e.toString().replaceFirst('Exception: ', '');
+      _connectionError = e.toString().replaceFirst('Exception: ', '');
       notifyListeners();
       return false;
     }
@@ -254,9 +243,7 @@ class BotProvider extends ChangeNotifier {
     }
 
     if (!_isConnected || _api == null) {
-      throw Exception(
-        'MT5 is not connected. Connect the account first.',
-      );
+      throw Exception('MT5 is not connected. Connect the account first.');
     }
 
     final config = TradingConfig(
@@ -267,12 +254,20 @@ class BotProvider extends ChangeNotifier {
       velocityExpansionThreshold: 1.5,
     );
 
-    _engine = VelocityReversalEngine(
-      api: _api!,
-      config: config,
-    );
+    _engineError = null;
 
-    await _engine!.start();
+    _engine = VelocityReversalEngine(api: _api!, config: config);
+
+    try {
+      await _engine!.start();
+    } catch (e) {
+      _engineError = e.toString().replaceFirst('Exception: ', '');
+      _isBotRunning = false;
+      _engine = null;
+      notifyListeners();
+      rethrow;
+    }
+
     _isBotRunning = true;
     _startUpdates();
     notifyListeners();
@@ -281,6 +276,7 @@ class BotProvider extends ChangeNotifier {
   Future<void> stopBot() async {
     _engine?.stop();
     _engine = null;
+    _engineError = null;
     _isBotRunning = false;
     _updateTimer?.cancel();
     await _fetchBotStatus();
@@ -289,19 +285,18 @@ class BotProvider extends ChangeNotifier {
 
   void _startUpdates() {
     _updateTimer?.cancel();
-    _updateTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) async {
-        if (_engine != null) {
-          try {
-            await _engine!.tick();
-          } catch (e) {
-            debugPrint('Velocity engine tick error: $e');
-          }
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (_engine != null) {
+        try {
+          await _engine!.tick();
+          _engineError = null;
+        } catch (e) {
+          _engineError = e.toString().replaceFirst('Exception: ', '');
+          debugPrint('Velocity engine tick error: $e');
         }
-        await _fetchBotStatus();
-      },
-    );
+      }
+      await _fetchBotStatus();
+    });
   }
 
   Future<void> _fetchBotStatus() async {

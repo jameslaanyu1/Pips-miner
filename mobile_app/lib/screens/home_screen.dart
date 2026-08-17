@@ -30,16 +30,10 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Pip-life',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
+            Text('Pip-life', style: TextStyle(fontWeight: FontWeight.w600)),
             Text(
               'life changing pips',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w400,
-              ),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w400),
             ),
           ],
         ),
@@ -51,7 +45,10 @@ class _HomeScreenState extends State<HomeScreen> {
               builder: (context, botProvider, _) {
                 return Center(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: botProvider.isConnected
                           ? Colors.green.withOpacity(0.2)
@@ -61,7 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Text(
                       botProvider.isConnected ? 'Connected' : 'Disconnected',
                       style: TextStyle(
-                        color: botProvider.isConnected ? Colors.green : Colors.red,
+                        color: botProvider.isConnected
+                            ? Colors.green
+                            : Colors.red,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -121,6 +120,88 @@ class _HomeScreenState extends State<HomeScreen> {
 
             // Bot Status Card
             const BotStatusCard(),
+            const SizedBox(height: 12),
+
+            Consumer<BotProvider>(
+              builder: (context, botProvider, _) {
+                final hasPosition = botProvider.currentPosition != null;
+
+                final String title;
+                final String message;
+                final Color color;
+                final IconData icon;
+
+                if (!botProvider.isConnected) {
+                  title = 'ENGINE OFFLINE';
+                  message =
+                      botProvider.connectionError ??
+                      'Connect the MT5 account before starting the bot.';
+                  color = Colors.red;
+                  icon = Icons.cloud_off;
+                } else if (botProvider.engineError != null) {
+                  title = 'ENGINE ERROR';
+                  message = botProvider.engineError!;
+                  color = Colors.red;
+                  icon = Icons.error_outline;
+                } else if (!botProvider.isBotRunning) {
+                  title = 'ENGINE STOPPED';
+                  message = 'Press START to run the trading engine.';
+                  color = Colors.orange;
+                  icon = Icons.stop_circle_outlined;
+                } else if (hasPosition) {
+                  title = 'POSITION OPEN';
+                  message =
+                      '${botProvider.currentPosition} position is active on ${botProvider.symbol}.';
+                  color = Colors.green;
+                  icon = Icons.trending_up;
+                } else {
+                  title = 'WAITING FOR ENTRY SIGNAL';
+                  message =
+                      'Trading engine is running on ${botProvider.symbol} M1 and is waiting for a qualifying velocity + volume expansion.';
+                  color = Colors.green;
+                  icon = Icons.radar;
+                }
+
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(icon, color: color),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: TextStyle(
+                                  color: color,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(message),
+                              if (botProvider.isBotRunning &&
+                                  !hasPosition &&
+                                  botProvider.engineError == null) ...[
+                                const SizedBox(height: 5),
+                                const Text(
+                                  'Entry requires both velocity expansion and volume expansion.',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
             const SizedBox(height: 20),
 
             // Trading Metrics
@@ -145,15 +226,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                   await botProvider.startBot();
                                 } catch (e) {
                                   if (!context.mounted) return;
-                                  ScaffoldMessenger.of(context)
-                                      .showSnackBar(
+                                  ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       backgroundColor: Colors.red,
-                                      content: Text(
-                                        'Bot start failed: $e',
-                                      ),
-                                      duration:
-                                          const Duration(seconds: 8),
+                                      content: Text('Bot start failed: $e'),
+                                      duration: const Duration(seconds: 8),
                                     ),
                                   );
                                 }
