@@ -41,14 +41,119 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadConnection() async {
-    final login = await _storage.login();
-    final server = await _storage.server();
+    final login = await _storage.getMt5Login();
+    final server = await _storage.getMt5Server();
     if (!mounted) return;
 
     setState(() {
       _loginController.text = login ?? '';
       _serverController.text = server ?? '';
     });
+  }
+
+  Future<void> _setupMetaApi() async {
+    final tokenController = TextEditingController();
+    final accountIdController = TextEditingController();
+
+    final existingToken = await _storage.getMetaApiToken();
+    final existingAccountId = await _storage.getMetaApiAccountId();
+
+    if (existingToken != null) {
+      tokenController.text = existingToken;
+    }
+    if (existingAccountId != null) {
+      accountIdController.text = existingAccountId;
+    }
+
+    if (!mounted) {
+      tokenController.dispose();
+      accountIdController.dispose();
+      return;
+    }
+
+    final saved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('MetaApi Setup'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Enter the MetaApi credentials assigned to this app. '
+                  'They are stored securely on this device and will not '
+                  'be requested again unless cleared.',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: tokenController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'MetaApi API Token',
+                    prefixIcon: Icon(Icons.key),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: accountIdController,
+                  decoration: const InputDecoration(
+                    labelText: 'MetaApi Account ID',
+                    prefixIcon: Icon(Icons.account_circle),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('CANCEL'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final token = tokenController.text.trim();
+                final accountId = accountIdController.text.trim();
+
+                if (token.isEmpty || accountId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Enter both the MetaApi API token and account ID.',
+                      ),
+                    ),
+                  );
+                  return;
+                }
+
+                await _storage.saveMetaApiCredentials(
+                  token: token,
+                  accountId: accountId,
+                );
+
+                if (context.mounted) {
+                  Navigator.pop(context, true);
+                }
+              },
+              child: const Text('SAVE'),
+            ),
+          ],
+        );
+      },
+    );
+
+    tokenController.dispose();
+    accountIdController.dispose();
+
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('MetaApi credentials stored securely on this device.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   Future<void> _connect(BotProvider bot) async {
@@ -151,6 +256,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             labelText: 'MT5 Trading Password',
                             prefixIcon: Icon(Icons.lock),
                           ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        FutureBuilder<bool>(
+                          future: _storage.hasMetaApiCredentials(),
+                          builder: (context, snapshot) {
+                            final configured = snapshot.data == true;
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      configured
+                                          ? Icons.verified
+                                          : Icons.warning_amber,
+                                      color: configured
+                                          ? Colors.green
+                                          : Colors.orange,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        configured
+                                            ? 'MetaApi credentials configured for this app.'
+                                            : 'MetaApi credentials are not configured.',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: configured
+                                              ? Colors.green
+                                              : Colors.orange,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: bot.isBotRunning
+                                        ? null
+                                        : _setupMetaApi,
+                                    icon: const Icon(Icons.key),
+                                    label: Text(
+                                      configured
+                                          ? 'UPDATE METAAPI CREDENTIALS'
+                                          : 'SET UP METAAPI',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
 
                         const SizedBox(height: 16),
