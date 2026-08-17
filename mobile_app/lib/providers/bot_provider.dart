@@ -63,6 +63,7 @@ class BotProvider extends ChangeNotifier {
       final running = event?['running'] == true;
 
       _isBotRunning = running;
+      _stopPrice = _number(event?['reversalPrice']);
 
       if (running) {
         _engineError = null;
@@ -354,7 +355,7 @@ class BotProvider extends ChangeNotifier {
         final type = p['type']?.toString() ?? '';
         _currentPosition = type.contains('SELL') ? 'SELL' : 'BUY';
         _entryPrice = _number(p['openPrice']);
-        _stopPrice = _engine?.reversalPrice;
+        _stopPrice = _number(event?['reversalPrice']);
       } else {
         _currentPosition = null;
         _entryPrice = null;

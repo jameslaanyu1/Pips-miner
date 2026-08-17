@@ -151,6 +151,7 @@ Future<void> pipsMinerBackgroundEntrypoint(
         'timestamp': DateTime.now().toIso8601String(),
         'position': engine.activeDirection?.name,
         'entryId': engine.activePositionId,
+        'reversalPrice': engine.reversalPrice,
       });
     } catch (e) {
       debugPrint(
