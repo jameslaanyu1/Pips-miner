@@ -90,7 +90,7 @@ class TradingMetrics extends StatelessWidget {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '${botProvider.profitLoss >= 0 ? '+' : ''} \$${botProvider.profitLoss.toStringAsFixed(2)}',
+                            '${botProvider.profitLoss >= 0 ? '+ ' : '- '}Ksh ${botProvider.profitLoss.abs().toStringAsFixed(2)}',
                             style: TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
