@@ -53,6 +53,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
 
   late final VelocityReversalEngine engine;
   late final TradingConfig config;
+  late final MetaApiService api;
 
   try {
     final storage = SecureStorageService();
@@ -69,7 +70,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       throw Exception('MetaApi credentials are not configured.');
     }
 
-    final api = MetaApiService(
+    api = MetaApiService(
       token: token.trim(),
       accountId: accountId.trim(),
       region: region?.trim().isNotEmpty == true ? region!.trim() : 'new-york',
