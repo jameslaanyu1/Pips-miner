@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - apk-build
+      - agent/pips-miner-rebuild
   workflow_dispatch:
 
 jobs:
