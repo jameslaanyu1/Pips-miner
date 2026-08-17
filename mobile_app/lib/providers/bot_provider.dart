@@ -355,7 +355,9 @@ class BotProvider extends ChangeNotifier {
         final type = p['type']?.toString() ?? '';
         _currentPosition = type.contains('SELL') ? 'SELL' : 'BUY';
         _entryPrice = _number(p['openPrice']);
-        _stopPrice = _number(event?['reversalPrice']);
+        // Reversal price is supplied by the Android background engine
+        // through the engineStatus event. Do not reference an out-of-scope
+        // event here or overwrite the engine's reversal price.
       } else {
         _currentPosition = null;
         _entryPrice = null;
