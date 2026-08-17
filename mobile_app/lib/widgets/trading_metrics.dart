@@ -121,7 +121,7 @@ class TradingMetrics extends StatelessWidget {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '\$${botProvider.balance.toStringAsFixed(2)}',
+                            'Ksh ${botProvider.balance.toStringAsFixed(2)}',
                             style: const TextStyle(
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
