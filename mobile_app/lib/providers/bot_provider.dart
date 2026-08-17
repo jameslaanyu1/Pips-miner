@@ -163,7 +163,9 @@ class BotProvider extends ChangeNotifier {
       }
 
       final resolvedAccountId =
-          matchedAccount['id']?.toString().trim() ?? '';
+          (matchedAccount['_id'] ?? matchedAccount['id'])
+              ?.toString()
+              .trim() ?? '';
 
       if (resolvedAccountId.isEmpty) {
         throw Exception(

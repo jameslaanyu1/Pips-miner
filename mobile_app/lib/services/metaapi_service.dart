@@ -272,6 +272,15 @@ class MetaApiService {
       return decoded;
     }
 
+    // MetaApi provisioning may return a paginated object:
+    // {"count": ..., "items": [...]}
+    if (decoded is Map<String, dynamic>) {
+      final items = decoded['items'];
+      if (items is List) {
+        return items;
+      }
+    }
+
     throw Exception(
       'Unexpected MetaApi list response',
     );
