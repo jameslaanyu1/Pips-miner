@@ -3,55 +3,125 @@ import 'package:http/http.dart' as http;
 
 class MetaApiService {
   MetaApiService({
-    required this.sessionToken,
-    required this.baseUrl,
+    required this.token,
+    required this.accountId,
+    this.region = 'new-york',
   });
 
-  final String sessionToken;
-  final String baseUrl;
+  final String token;
+  final String accountId;
+  final String region;
+
+  static const String _provisioningBase =
+      'https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai';
+
+  String get _clientBase =>
+      'https://mt-client-api-v1.$region.agiliumtrade.ai';
 
   Map<String, String> get _headers => {
-        'Authorization': 'Bearer $sessionToken',
+        'auth-token': token,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       };
 
-  Uri _uri(String path) {
-    final clean = baseUrl.replaceFirst(RegExp(r'/$'), '');
-    return Uri.parse('$clean$path');
+  Uri _provisioning(String path) =>
+      Uri.parse('$_provisioningBase$path');
+
+  Uri _client(String path) =>
+      Uri.parse('$_clientBase/users/current/accounts/$accountId$path');
+
+  Future<Map<String, dynamic>> account() async {
+    final response = await http.get(
+      _provisioning('/users/current/accounts/$accountId'),
+      headers: _headers,
+    );
+
+    return _map(response);
+  }
+
+  Future<Map<String, dynamic>> configureCredentials({
+    required String login,
+    required String password,
+  }) async {
+    final response = await http.put(
+      _provisioning(
+        '/users/current/accounts/$accountId/credentials',
+      ),
+      headers: _headers,
+      body: jsonEncode({
+        'login': login.trim(),
+        'password': password,
+      }),
+    );
+
+    return _map(response);
+  }
+
+  Future<void> deploy() async {
+    final response = await http.post(
+      _provisioning(
+        '/users/current/accounts/$accountId/deploy',
+      ),
+      headers: _headers,
+    );
+
+    if (response.statusCode != 204 &&
+        response.statusCode < 200 ||
+        response.statusCode >= 300) {
+      throw Exception(
+        'MetaApi deployment failed: ${response.body}',
+      );
+    }
   }
 
   Future<Map<String, dynamic>> accountInformation() async {
-    final response =
-        await http.get(_uri('/api/v1/account-information'), headers: _headers);
+    final response = await http.get(
+      _client('/account-information'),
+      headers: _headers,
+    );
+
     return _map(response);
   }
 
   Future<List<dynamic>> positions() async {
-    final response =
-        await http.get(_uri('/api/v1/positions'), headers: _headers);
+    final response = await http.get(
+      _client('/positions'),
+      headers: _headers,
+    );
+
     return _list(response);
   }
 
   Future<List<dynamic>> orders() async {
-    final response =
-        await http.get(_uri('/api/v1/orders'), headers: _headers);
+    final response = await http.get(
+      _client('/orders'),
+      headers: _headers,
+    );
+
     return _list(response);
   }
 
   Future<Map<String, dynamic>> symbolPrice(String symbol) async {
     final response = await http.get(
-      _uri('/api/v1/symbols/${Uri.encodeComponent(symbol)}/current-price'),
+      _client(
+        '/symbols/${Uri.encodeComponent(symbol)}/current-price',
+      ),
       headers: _headers,
     );
+
     return _map(response);
   }
 
-  Future<Map<String, dynamic>> symbolSpecification(String symbol) async {
+  Future<Map<String, dynamic>> symbolSpecification(
+    String symbol,
+  ) async {
     final response = await http.get(
-      _uri('/api/v1/symbols/${Uri.encodeComponent(symbol)}/specification'),
+      _client(
+        '/symbols/${Uri.encodeComponent(symbol)}/specification',
+      ),
       headers: _headers,
     );
+
     return _map(response);
   }
 
@@ -60,11 +130,12 @@ class MetaApiService {
     String timeframe = '1m',
   }) async {
     final response = await http.get(
-      _uri(
-        '/api/v1/symbols/${Uri.encodeComponent(symbol)}/current-candles/$timeframe',
+      _client(
+        '/symbols/${Uri.encodeComponent(symbol)}/current-candles/$timeframe',
       ),
       headers: _headers,
     );
+
     return _list(response);
   }
 
@@ -76,7 +147,9 @@ class MetaApiService {
     int? magic,
   }) {
     return _trade({
-      'actionType': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+      'actionType': buy
+          ? 'ORDER_TYPE_BUY'
+          : 'ORDER_TYPE_SELL',
       'symbol': symbol,
       'volume': volume,
       if (clientId != null) 'clientId': clientId,
@@ -93,7 +166,9 @@ class MetaApiService {
     int? magic,
   }) {
     return _trade({
-      'actionType': buy ? 'ORDER_TYPE_BUY_STOP' : 'ORDER_TYPE_SELL_STOP',
+      'actionType': buy
+          ? 'ORDER_TYPE_BUY_STOP'
+          : 'ORDER_TYPE_SELL_STOP',
       'symbol': symbol,
       'volume': volume,
       'openPrice': openPrice,
@@ -113,14 +188,18 @@ class MetaApiService {
     });
   }
 
-  Future<Map<String, dynamic>> cancelOrder(String orderId) {
+  Future<Map<String, dynamic>> cancelOrder(
+    String orderId,
+  ) {
     return _trade({
       'actionType': 'ORDER_CANCEL',
       'orderId': orderId,
     });
   }
 
-  Future<Map<String, dynamic>> closePosition(String positionId) {
+  Future<Map<String, dynamic>> closePosition(
+    String positionId,
+  ) {
     return _trade({
       'actionType': 'POSITION_CLOSE_ID',
       'positionId': positionId,
@@ -134,45 +213,66 @@ class MetaApiService {
     required double openPrice,
   }) async {
     final response = await http.post(
-      _uri('/api/v1/calculate-margin'),
+      _client('/calculate-margin'),
       headers: _headers,
       body: jsonEncode({
         'symbol': symbol,
-        'type': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL',
+        'type': buy
+            ? 'ORDER_TYPE_BUY'
+            : 'ORDER_TYPE_SELL',
         'volume': volume,
         'openPrice': openPrice,
       }),
     );
+
     return _map(response);
   }
 
-  Future<Map<String, dynamic>> _trade(Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> _trade(
+    Map<String, dynamic> body,
+  ) async {
     final response = await http.post(
-      _uri('/api/v1/trade'),
+      _client('/trade'),
       headers: _headers,
       body: jsonEncode(body),
     );
+
     return _map(response);
   }
 
   Map<String, dynamic> _map(http.Response response) {
     _check(response);
+
     final decoded = jsonDecode(response.body);
-    if (decoded is Map<String, dynamic>) return decoded;
-    throw Exception('Unexpected Pips-Miner response');
+
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+
+    throw Exception(
+      'Unexpected MetaApi response',
+    );
   }
 
   List<dynamic> _list(http.Response response) {
     _check(response);
+
     final decoded = jsonDecode(response.body);
-    if (decoded is List) return decoded;
-    throw Exception('Unexpected Pips-Miner list response');
+
+    if (decoded is List) {
+      return decoded;
+    }
+
+    throw Exception(
+      'Unexpected MetaApi list response',
+    );
   }
 
   void _check(http.Response response) {
-    if (response.statusCode < 200 || response.statusCode >= 300) {
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300) {
       throw Exception(
-        'Pips-Miner HTTP ${response.statusCode}: ${response.body}',
+        'MetaApi HTTP ${response.statusCode}: ${response.body}',
       );
     }
   }

@@ -68,27 +68,23 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final session = await _storage.sessionToken();
-      final backend = await _storage.backendUrl();
+      final token = await _storage.getMetaApiToken();
+      final accountId = await _storage.getMetaApiAccountId();
 
-      if (session == null || session.isEmpty) {
+      if (token == null ||
+          token.trim().isEmpty ||
+          accountId == null ||
+          accountId.trim().isEmpty) {
         _isConnected = false;
         _connectionError =
-            'MT5 account is not connected. Open Settings and connect your account.';
-        notifyListeners();
-        return;
-      }
-
-      if (backend == null || backend.isEmpty) {
-        _isConnected = false;
-        _connectionError = 'Pips-Miner backend address is not configured.';
+            'MetaApi credentials are not configured.';
         notifyListeners();
         return;
       }
 
       _api = MetaApiService(
-        sessionToken: session,
-        baseUrl: backend,
+        token: token.trim(),
+        accountId: accountId.trim(),
       );
 
       await _api!.accountInformation();
@@ -101,13 +97,12 @@ class BotProvider extends ChangeNotifier {
     } catch (e) {
       _isConnected = false;
       _connectionError = _friendlyConnectionError(e);
-      debugPrint('Pips-Miner connection error: $e');
+      debugPrint('Pips-Miner MetaApi connection error: $e');
       notifyListeners();
     }
   }
 
   Future<bool> connectMt5({
-    required String backendUrl,
     required String login,
     required String password,
     required String server,
@@ -116,55 +111,82 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await http.post(
-        Uri.parse(
-          '${backendUrl.replaceFirst(RegExp(r'/$'), '')}/api/v1/connect',
-        ),
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'login': login.trim(),
-          'password': password,
-          'server': server.trim(),
-          'platform': 'mt5',
-        }),
-      );
+      final token = await _storage.getMetaApiToken();
+      final accountId = await _storage.getMetaApiAccountId();
 
-      final decoded = jsonDecode(response.body);
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (token == null ||
+          token.trim().isEmpty ||
+          accountId == null ||
+          accountId.trim().isEmpty) {
         throw Exception(
-          decoded is Map && decoded['error'] != null
-              ? decoded['error'].toString()
-              : 'MT5 connection failed.',
+          'MetaApi credentials have not been configured for this app.',
         );
       }
 
-      if (decoded is! Map || decoded['sessionToken'] == null) {
-        throw Exception('Backend did not return a valid session.');
-      }
-
-      final accountId = decoded['accountId']?.toString().trim() ?? '';
-      if (accountId.isEmpty) {
-        throw Exception('Backend did not return the MetaApi account ID.');
-      }
-
-      await _storage.saveConnection(
-        sessionToken: decoded['sessionToken'].toString(),
-        backendUrl: backendUrl.trim(),
-        accountId: accountId,
-        login: login.trim(),
-        server: server.trim(),
-        platform: 'mt5',
+      final provisioning = MetaApiService(
+        token: token.trim(),
+        accountId: accountId.trim(),
       );
 
-      await connect();
-      return _isConnected;
+      final account = await provisioning.account();
+
+      final expectedServer =
+          account['server']?.toString().trim() ?? '';
+      final expectedLogin =
+          account['login']?.toString().trim() ?? '';
+
+      if (expectedServer.isNotEmpty &&
+          expectedServer.toLowerCase() !=
+              server.trim().toLowerCase()) {
+        throw Exception(
+          'Broker server does not match the MetaApi account. '
+          'Expected: $expectedServer',
+        );
+      }
+
+      if (expectedLogin.isNotEmpty &&
+          expectedLogin != login.trim()) {
+        throw Exception(
+          'MT5 account number does not match the MetaApi account.',
+        );
+      }
+
+      final region =
+          account['region']?.toString().trim() ?? 'new-york';
+
+      final api = MetaApiService(
+        token: token.trim(),
+        accountId: accountId.trim(),
+        region: region.isEmpty ? 'new-york' : region,
+      );
+
+      await api.configureCredentials(
+        login: login.trim(),
+        password: password,
+      );
+
+      await api.deploy();
+
+      _api = api;
+
+      await api.accountInformation();
+
+      await _storage.saveMt5Connection(
+        login: login.trim(),
+        server: server.trim(),
+      );
+
+      _isConnected = true;
+      _connectionError = null;
+
+      await _fetchBotStatus();
+      notifyListeners();
+
+      return true;
     } catch (e) {
       _isConnected = false;
-      _connectionError = e.toString().replaceFirst('Exception: ', '');
+      _connectionError =
+          e.toString().replaceFirst('Exception: ', '');
       notifyListeners();
       return false;
     }

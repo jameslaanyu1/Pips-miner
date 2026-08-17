@@ -51,25 +51,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadConnection() async {
     final login = await _storage.login();
     final server = await _storage.server();
-    final backend = await _storage.backendUrl();
-
     if (!mounted) return;
 
     setState(() {
       _loginController.text = login ?? '';
       _serverController.text = server ?? '';
-      _backendController.text = backend ?? '';
     });
   }
 
   Future<void> _connect(BotProvider bot) async {
-    final backend = _backendController.text.trim();
     final login = _loginController.text.trim();
     final password = _passwordController.text;
     final server = _serverController.text.trim();
 
-    if (backend.isEmpty ||
-        login.isEmpty ||
+    if (login.isEmpty ||
         password.isEmpty ||
         server.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -83,7 +78,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     final success = await bot.connectMt5(
-      backendUrl: backend,
       login: login,
       password: password,
       server: server,
