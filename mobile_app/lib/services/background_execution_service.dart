@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../models/trading_config.dart';
 import 'metaapi_service.dart';
@@ -14,6 +15,20 @@ const int pipsMinerNotificationId = 26081501;
 
 Future<void> initializePipsMinerBackgroundService() async {
   final service = FlutterBackgroundService();
+
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    pipsMinerServiceChannel,
+    'Pips Miner Trading',
+    description: 'Foreground notification for the Pips Miner trading engine.',
+    importance: Importance.low,
+  );
+
+  final notifications = FlutterLocalNotificationsPlugin();
+
+  await notifications
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
 
   await service.configure(
     androidConfiguration: AndroidConfiguration(
