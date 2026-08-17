@@ -58,8 +58,7 @@ class BotProvider extends ChangeNotifier {
   void _bindBackgroundService() {
     final service = FlutterBackgroundService();
 
-    _engineStatusSubscription =
-        service.on('engineStatus').listen((event) {
+    _engineStatusSubscription = service.on('engineStatus').listen((event) {
       final running = event?['running'] == true;
 
       _isBotRunning = running;
@@ -72,8 +71,7 @@ class BotProvider extends ChangeNotifier {
       notifyListeners();
     });
 
-    _engineErrorSubscription =
-        service.on('engineError').listen((event) {
+    _engineErrorSubscription = service.on('engineError').listen((event) {
       final message = event?['message']?.toString();
       final fatal = event?['fatal'] == true;
 
@@ -100,6 +98,7 @@ class BotProvider extends ChangeNotifier {
   void updateSettings({String? symbol}) {
     if (symbol != null && symbol.trim().isNotEmpty) {
       _symbol = symbol.trim().toUpperCase();
+      unawaited(_storage.saveTradingSymbol(_symbol));
     }
     notifyListeners();
   }
@@ -111,6 +110,7 @@ class BotProvider extends ChangeNotifier {
     try {
       final token = await _storage.getMetaApiToken();
       final accountId = await _storage.getMetaApiAccountId();
+      final region = await _storage.getMetaApiRegion();
 
       if (token == null ||
           token.trim().isEmpty ||
@@ -122,7 +122,11 @@ class BotProvider extends ChangeNotifier {
         return;
       }
 
-      _api = MetaApiService(token: token.trim(), accountId: accountId.trim());
+      _api = MetaApiService(
+        token: token.trim(),
+        accountId: accountId.trim(),
+        region: region?.trim().isNotEmpty == true ? region!.trim() : 'new-york',
+      );
 
       await _api!.accountInformation();
 
@@ -197,7 +201,11 @@ class BotProvider extends ChangeNotifier {
       }
 
       final resolvedAccountId =
-          (matchedAccount['_id'] ?? matchedAccount['id'])?.toString().trim() ??
+          (matchedAccount['_id'] ??
+                  matchedAccount['id'] ??
+                  matchedAccount['accountId'])
+              ?.toString()
+              .trim() ??
           '';
 
       if (resolvedAccountId.isEmpty) {
@@ -218,6 +226,7 @@ class BotProvider extends ChangeNotifier {
       await _storage.saveMetaApiCredentials(
         token: token.trim(),
         accountId: resolvedAccountId,
+        region: region.isEmpty ? 'new-york' : region,
       );
 
       await api.configureCredentials(login: login.trim(), password: password);
@@ -282,9 +291,7 @@ class BotProvider extends ChangeNotifier {
     }
 
     if (!_isConnected || _api == null) {
-      throw Exception(
-        'MT5 is not connected. Connect the account first.',
-      );
+      throw Exception('MT5 is not connected. Connect the account first.');
     }
 
     _engineError = null;
@@ -318,9 +325,7 @@ class BotProvider extends ChangeNotifier {
     _engineError = null;
     _updateTimer?.cancel();
 
-    await Future<void>.delayed(
-      const Duration(milliseconds: 250),
-    );
+    await Future<void>.delayed(const Duration(milliseconds: 250));
 
     await _fetchBotStatus();
     notifyListeners();
@@ -329,12 +334,9 @@ class BotProvider extends ChangeNotifier {
   void _startUpdates() {
     _updateTimer?.cancel();
 
-    _updateTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) async {
-        await _fetchBotStatus();
-      },
-    );
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      await _fetchBotStatus();
+    });
   }
 
   Future<void> _fetchBotStatus() async {

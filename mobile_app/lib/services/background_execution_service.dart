@@ -25,9 +25,7 @@ Future<void> initializePipsMinerBackgroundService() async {
       initialNotificationTitle: 'Pips Miner',
       initialNotificationContent: 'Trading engine is running',
       foregroundServiceNotificationId: pipsMinerNotificationId,
-      foregroundServiceTypes: const [
-        AndroidForegroundType.specialUse,
-      ],
+      foregroundServiceTypes: const [AndroidForegroundType.specialUse],
     ),
     iosConfiguration: IosConfiguration(
       autoStart: false,
@@ -45,9 +43,7 @@ Future<bool> pipsMinerIosBackground(ServiceInstance service) async {
 }
 
 @pragma('vm:entry-point')
-Future<void> pipsMinerBackgroundEntrypoint(
-  ServiceInstance service,
-) async {
+Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
 
@@ -55,40 +51,54 @@ Future<void> pipsMinerBackgroundEntrypoint(
     service.setAsForegroundService();
   }
 
-  final storage = SecureStorageService();
+  late final VelocityReversalEngine engine;
+  late final TradingConfig config;
 
-  final token = await storage.getMetaApiToken();
-  final accountId = await storage.getMetaApiAccountId();
+  try {
+    final storage = SecureStorageService();
 
-  if (token == null ||
-      token.trim().isEmpty ||
-      accountId == null ||
-      accountId.trim().isEmpty) {
+    final token = await storage.getMetaApiToken();
+    final accountId = await storage.getMetaApiAccountId();
+    final region = await storage.getMetaApiRegion();
+    final storedSymbol = await storage.getTradingSymbol();
+
+    if (token == null ||
+        token.trim().isEmpty ||
+        accountId == null ||
+        accountId.trim().isEmpty) {
+      throw Exception('MetaApi credentials are not configured.');
+    }
+
+    final api = MetaApiService(
+      token: token.trim(),
+      accountId: accountId.trim(),
+      region: region?.trim().isNotEmpty == true ? region!.trim() : 'new-york',
+    );
+
+    final symbol = storedSymbol?.trim().isNotEmpty == true
+        ? storedSymbol!.trim().toUpperCase()
+        : 'XAUUSD';
+
+    config = TradingConfig(
+      symbol: symbol,
+      trailingPips: 100.0,
+      reversalPips: 100.0,
+      velocityBaselinePeriod: 14,
+      velocityExpansionThreshold: 1.5,
+    );
+
+    engine = VelocityReversalEngine(api: api, config: config);
+  } catch (e) {
+    debugPrint('Pips Miner background initialization error: $e');
+
     service.invoke('engineError', {
       'fatal': true,
-      'message': 'MetaApi credentials are not configured.',
+      'message': e.toString().replaceFirst('Exception: ', ''),
     });
+
     service.stopSelf();
     return;
   }
-
-  final api = MetaApiService(
-    token: token.trim(),
-    accountId: accountId.trim(),
-  );
-
-  final config = TradingConfig(
-    symbol: 'XAUUSD',
-    trailingPips: 100.0,
-    reversalPips: 100.0,
-    velocityBaselinePeriod: 14,
-    velocityExpansionThreshold: 1.5,
-  );
-
-  final engine = VelocityReversalEngine(
-    api: api,
-    config: config,
-  );
 
   var stopped = false;
 
@@ -154,9 +164,7 @@ Future<void> pipsMinerBackgroundEntrypoint(
         'reversalPrice': engine.reversalPrice,
       });
     } catch (e) {
-      debugPrint(
-        'Pips Miner background engine tick error: $e',
-      );
+      debugPrint('Pips Miner background engine tick error: $e');
 
       service.invoke('engineError', {
         'fatal': false,
