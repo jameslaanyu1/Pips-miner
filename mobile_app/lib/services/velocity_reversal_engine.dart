@@ -188,7 +188,12 @@ class VelocityReversalEngine {
             Map<String, dynamic>.from(c),
           ),
         )
-        .toList();
+        .toList()
+      ..sort((a, b) => a.time.compareTo(b.time));
+
+    if (candles.length < config.velocityBaselinePeriod + 1) {
+      return;
+    }
 
     final signal = VelocityExpansion.analyze(
       candles,

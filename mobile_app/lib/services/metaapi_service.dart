@@ -137,11 +137,26 @@ class MetaApiService {
   Future<List<dynamic>> candles(
     String symbol, {
     String timeframe = '1m',
+    int limit = 100,
   }) async {
+    // MetaApi current-candles returns ONE candle.
+    // The velocity engine needs a rolling M1 history for its
+    // 14-candle velocity and volume baselines.
+    final marketDataBase =
+        'https://mt-market-data-client-api-v1.$region.agiliumtrade.ai';
+
+    final uri = Uri.parse(
+      '$marketDataBase/users/current/accounts/$accountId'
+      '/historical-market-data/symbols/${Uri.encodeComponent(symbol)}'
+      '/timeframes/$timeframe/candles',
+    ).replace(
+      queryParameters: {
+        'limit': limit.toString(),
+      },
+    );
+
     final response = await http.get(
-      _client(
-        '/symbols/${Uri.encodeComponent(symbol)}/current-candles/$timeframe',
-      ),
+      uri,
       headers: _headers,
     );
 
