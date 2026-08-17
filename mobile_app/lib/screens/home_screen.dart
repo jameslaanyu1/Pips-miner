@@ -140,7 +140,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: ElevatedButton.icon(
                         onPressed: botProvider.isBotRunning
                             ? null
-                            : () => botProvider.startBot(),
+                            : () async {
+                                try {
+                                  await botProvider.startBot();
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(
+                                    SnackBar(
+                                      backgroundColor: Colors.red,
+                                      content: Text(
+                                        'Bot start failed: $e',
+                                      ),
+                                      duration:
+                                          const Duration(seconds: 8),
+                                    ),
+                                  );
+                                }
+                              },
                         icon: const Icon(Icons.play_arrow),
                         label: const Text('START'),
                         style: ElevatedButton.styleFrom(
