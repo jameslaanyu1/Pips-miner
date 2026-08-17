@@ -34,7 +34,18 @@ jobs:
           cache: true
 
       - name: Generate Android platform
-        run: flutter create --platforms=android --project-name=pips_miner_app .
+        run: flutter create --platforms=android --project-name=pips_miner .
+
+      - name: Set Android app name to Pips Miner
+        run: |
+          python - <<'PY2'
+          from pathlib import Path
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          s = s.replace('android:label="pips_miner"', 'android:label="Pips Miner"')
+          s = s.replace('android:label="pips_miner_app"', 'android:label="Pips Miner"')
+          p.write_text(s)
+          PY2
 
       - name: Enable Android Internet access
         run: |
