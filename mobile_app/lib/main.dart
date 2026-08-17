@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 import 'providers/bot_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/background_execution_service.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializePipsMinerBackgroundService();
   runApp(const PipsMinerApp());
 }
 

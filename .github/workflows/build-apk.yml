@@ -46,6 +46,49 @@ jobs:
         run: |
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
 
+      - name: Configure Android foreground trading service
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+
+          permissions = [
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
+              '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+              '<uses-permission android:name="android.permission.WAKE_LOCK" />',
+          ]
+
+          for permission in permissions:
+              if permission not in text:
+                  text = text.replace(
+                      '<application',
+                      permission + '\\n    <application',
+                      1,
+                  )
+
+          service = '''    <service
+              android:name="id.flutter.flutter_background_service.BackgroundService"
+              android:exported="false"
+              android:foregroundServiceType="specialUse">
+              <property
+                  android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                  android:value="continuous user-initiated MT5 trading engine execution" />
+          </service>
+          '''
+
+          if 'id.flutter.flutter_background_service.BackgroundService' not in text:
+              text = text.replace(
+                  '</application>',
+                  service + '</application>',
+                  1,
+              )
+
+          manifest.write_text(text)
+          PY
+
       - name: Install dependencies
         run: flutter pub get
 

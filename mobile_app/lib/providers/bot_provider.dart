@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 import '../models/trading_config.dart';
+import '../services/background_execution_service.dart';
 import '../services/metaapi_service.dart';
 import '../services/secure_storage_service.dart';
-import '../services/velocity_reversal_engine.dart';
 
 class BotProvider extends ChangeNotifier {
-  BotProvider();
+  BotProvider() {
+    _bindBackgroundService();
+  }
 
   final SecureStorageService _storage = SecureStorageService();
 
@@ -32,7 +35,9 @@ class BotProvider extends ChangeNotifier {
 
   Timer? _updateTimer;
   MetaApiService? _api;
-  VelocityReversalEngine? _engine;
+
+  StreamSubscription<Map<String, dynamic>?>? _engineStatusSubscription;
+  StreamSubscription<Map<String, dynamic>?>? _engineErrorSubscription;
 
   bool get isLiveAccount => _isLiveAccount;
   bool get isBotRunning => _isBotRunning;
@@ -49,6 +54,39 @@ class BotProvider extends ChangeNotifier {
   double get priceChange => _priceChange;
   String get symbol => _symbol;
   String get accountMode => _isLiveAccount ? 'LIVE' : 'DEMO';
+
+  void _bindBackgroundService() {
+    final service = FlutterBackgroundService();
+
+    _engineStatusSubscription =
+        service.on('engineStatus').listen((event) {
+      final running = event?['running'] == true;
+
+      _isBotRunning = running;
+
+      if (running) {
+        _engineError = null;
+      }
+
+      notifyListeners();
+    });
+
+    _engineErrorSubscription =
+        service.on('engineError').listen((event) {
+      final message = event?['message']?.toString();
+      final fatal = event?['fatal'] == true;
+
+      if (message != null && message.isNotEmpty) {
+        _engineError = message;
+      }
+
+      if (fatal) {
+        _isBotRunning = false;
+      }
+
+      notifyListeners();
+    });
+  }
 
   void setAccountMode(bool isLive) {
     if (_isBotRunning) return;
@@ -243,29 +281,24 @@ class BotProvider extends ChangeNotifier {
     }
 
     if (!_isConnected || _api == null) {
-      throw Exception('MT5 is not connected. Connect the account first.');
+      throw Exception(
+        'MT5 is not connected. Connect the account first.',
+      );
     }
-
-    final config = TradingConfig(
-      symbol: _symbol,
-      trailingPips: 100.0,
-      reversalPips: 100.0,
-      velocityBaselinePeriod: 14,
-      velocityExpansionThreshold: 1.5,
-    );
 
     _engineError = null;
 
-    _engine = VelocityReversalEngine(api: _api!, config: config);
+    final service = FlutterBackgroundService();
+    final alreadyRunning = await service.isRunning();
 
-    try {
-      await _engine!.start();
-    } catch (e) {
-      _engineError = e.toString().replaceFirst('Exception: ', '');
-      _isBotRunning = false;
-      _engine = null;
-      notifyListeners();
-      rethrow;
+    if (!alreadyRunning) {
+      final started = await service.startService();
+
+      if (!started) {
+        throw Exception(
+          'Pips Miner background trading service could not start.',
+        );
+      }
     }
 
     _isBotRunning = true;
@@ -274,29 +307,33 @@ class BotProvider extends ChangeNotifier {
   }
 
   Future<void> stopBot() async {
-    _engine?.stop();
-    _engine = null;
-    _engineError = null;
+    final service = FlutterBackgroundService();
+
+    if (await service.isRunning()) {
+      service.invoke('stopService');
+    }
+
     _isBotRunning = false;
+    _engineError = null;
     _updateTimer?.cancel();
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 250),
+    );
+
     await _fetchBotStatus();
     notifyListeners();
   }
 
   void _startUpdates() {
     _updateTimer?.cancel();
-    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      if (_engine != null) {
-        try {
-          await _engine!.tick();
-          _engineError = null;
-        } catch (e) {
-          _engineError = e.toString().replaceFirst('Exception: ', '');
-          debugPrint('Velocity engine tick error: $e');
-        }
-      }
-      await _fetchBotStatus();
-    });
+
+    _updateTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) async {
+        await _fetchBotStatus();
+      },
+    );
   }
 
   Future<void> _fetchBotStatus() async {
@@ -332,7 +369,7 @@ class BotProvider extends ChangeNotifier {
         _profitLoss = equity - _balance;
       }
 
-      _isBotRunning = _engine?.running ?? false;
+      _isBotRunning = await FlutterBackgroundService().isRunning();
     } catch (e) {
       debugPrint('Status error: $e');
     }
@@ -347,8 +384,11 @@ class BotProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _engine?.stop();
+    // The Android foreground service owns the trading engine.
+    // Closing the dashboard must NOT stop trading.
     _updateTimer?.cancel();
+    _engineStatusSubscription?.cancel();
+    _engineErrorSubscription?.cancel();
     super.dispose();
   }
 }
