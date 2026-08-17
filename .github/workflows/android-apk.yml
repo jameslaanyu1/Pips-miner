@@ -35,6 +35,20 @@ jobs:
 
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner_app .
+
+      - name: Enable Android Internet access
+        run: |
+          python - <<'PY2'
+          from pathlib import Path
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          permission = '<uses-permission android:name="android.permission.INTERNET"/>'
+          if permission not in s:
+              s = s.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\\n    ' + permission)
+          p.write_text(s)
+          PY2
+
       - name: Remove generated test
         run: rm -f test/widget_test.dart
       - name: Install dependencies
