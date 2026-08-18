@@ -55,22 +55,22 @@ jobs:
           text = gradle.read_text()
 
           if "isCoreLibraryDesugaringEnabled = true" not in text:
-              marker = "android {\\n"
+              marker = "android {\n"
               if marker not in text:
                   raise SystemExit("android/app/build.gradle.kts: android block not found")
               text = text.replace(
                   marker,
-                  "android {\\n    compileOptions {\\n        isCoreLibraryDesugaringEnabled = true\\n    }\\n",
+                  "android {\n    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n    }\n",
                   1,
               )
 
           if "coreLibraryDesugaring(" not in text:
-              marker = "dependencies {\\n"
+              marker = "dependencies {\n"
               if marker not in text:
                   raise SystemExit("android/app/build.gradle.kts: dependencies block not found")
               text = text.replace(
                   marker,
-                  marker + "    coreLibraryDesugaring(\\"com.android.tools:desugar_jdk_libs:2.1.5\\")\\n",
+                  marker + "    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n",
                   1,
               )
 
