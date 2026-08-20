@@ -11,7 +11,7 @@ on:
       - ".github/workflows/build-apk.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -34,14 +34,26 @@ jobs:
       - name: Show Flutter version
         run: flutter --version
 
-      - name: Generate Android project
+      - name: Ensure persistent Android project
         run: |
-          flutter create \
-            --platforms=android \
-            --android-language kotlin \
-            --project-name=pips_miner \
-            --org=com.pipsminer \
-            .
+          if [ -f android/settings.gradle.kts ] && [ -f android/app/build.gradle.kts ]; then
+            echo "============================================"
+            echo "PERSISTENT ANDROID PROJECT FOUND"
+            echo "Skipping flutter create."
+            echo "============================================"
+          else
+            echo "============================================"
+            echo "ANDROID PROJECT NOT FOUND"
+            echo "Generating it once."
+            echo "============================================"
+
+            flutter create \
+              --platforms=android \
+              --android-language kotlin \
+              --project-name=pips_miner \
+              --org=com.pipsminer \
+              .
+          fi
 
       - name: Set Android compile SDK
         run: |
@@ -224,48 +236,25 @@ jobs:
           print("=======================================")
           PY
 
-      - name: Configure Android foreground trading service
+      - name: Persist Android project and configuration
+        working-directory: .
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
-          text = manifest.read_text()
+          git add mobile_app/android
 
-          permissions = [
-              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
-              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
-              '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
-              '<uses-permission android:name="android.permission.WAKE_LOCK" />',
-          ]
+          if git diff --cached --quiet; then
+            echo "Android project already persisted; nothing to commit."
+          else
+            git commit -m "Persist Android project for stable APK builds"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
 
-          for permission in permissions:
-              if permission not in text:
-                  text = text.replace(
-                      '<application',
-                      permission + '\\n    <application',
-                      1,
-                  )
-
-          service = '''    <service
-              android:name="id.flutter.flutter_background_service.BackgroundService"
-              android:exported="false"
-              android:foregroundServiceType="specialUse">
-              <property
-                  android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                  android:value="continuous user-initiated MT5 trading engine execution" />
-          </service>
-          '''
-
-          if 'id.flutter.flutter_background_service.BackgroundService' not in text:
-              text = text.replace(
-                  '</application>',
-                  service + '</application>',
-                  1,
-              )
-
-          manifest.write_text(text)
-          PY
+            echo "============================================"
+            echo "ANDROID PROJECT PERSISTED TO GIT"
+            echo "Future builds will reuse it directly."
+            echo "============================================"
+          fi
 
       - name: Install dependencies
         run: flutter pub get
