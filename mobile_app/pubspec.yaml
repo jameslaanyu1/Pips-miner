@@ -43,6 +43,9 @@ dependencies:
   
   # Notifications
   
+  # Notifications
+  flutter_local_notifications: ^19.5.0
+
   # Background Tasks
   flutter_background_service: ^5.1.0
   
