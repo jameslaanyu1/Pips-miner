@@ -1,24 +1,29 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const Color primaryColor = Color(0xFF6200EA);
-  static const Color secondaryColor = Color(0xFF03DAC6);
-  static const Color errorColor = Color(0xFFB00020);
-  static const Color successColor = Color(0xFF4CAF50);
-  static const Color warningColor = Color(0xFFFFC107);
+  static const Color primaryColor = Color(0xFF8B5CF6);
+  static const Color accentColor = Color(0xFFF5C451);
+  static const Color secondaryColor = Color(0xFF22D3EE);
+  static const Color errorColor = Color(0xFFFF5370);
+  static const Color successColor = Color(0xFF36D399);
+  static const Color warningColor = Color(0xFFFFB547);
 
-  static const Color darkBg = Color(0xFF121212);
-  static const Color darkSurface = Color(0xFF1E1E1E);
-  static const Color darkSurfaceVariant = Color(0xFF2C2C2C);
+  static const Color darkBg = Color(0xFF08080D);
+  static const Color darkSurface = Color(0xFF11111A);
+  static const Color darkSurfaceVariant = Color(0xFF1A1A26);
+  static const Color darkBorder = Color(0xFF29293A);
 
-  static const Color lightBg = Color(0xFFFAFAFA);
+  static const Color lightBg = Color(0xFFF7F7FB);
   static const Color lightSurface = Color(0xFFFFFFFF);
 
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
-      primaryColor: primaryColor,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: primaryColor,
+        brightness: Brightness.light,
+      ),
       scaffoldBackgroundColor: lightBg,
       appBarTheme: const AppBarTheme(
         backgroundColor: lightSurface,
@@ -27,14 +32,10 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: lightSurface,
-        elevation: 2,
+        elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(18),
         ),
-      ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
       ),
     );
   }
@@ -43,32 +44,69 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      primaryColor: primaryColor,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: primaryColor,
+        brightness: Brightness.dark,
+      ),
       scaffoldBackgroundColor: darkBg,
       appBarTheme: const AppBarTheme(
-        backgroundColor: darkSurface,
+        backgroundColor: darkBg,
         foregroundColor: Colors.white,
         elevation: 0,
       ),
       cardTheme: CardThemeData(
         color: darkSurface,
-        elevation: 2,
+        elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(
+            color: darkBorder,
+            width: 1,
+          ),
         ),
-      ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: darkSurfaceVariant,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(
+            color: primaryColor,
+            width: 1.2,
+          ),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 15,
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: darkSurface,
+        indicatorColor: primaryColor.withOpacity(0.22),
+        labelTextStyle: const WidgetStatePropertyAll(
+          TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryColor,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 50),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
       ),
     );
   }

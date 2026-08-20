@@ -24,7 +24,7 @@ class PipsMinerApp extends StatelessWidget {
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Pips Miner',
+        title: 'Pips-Miner',
         theme: AppTheme.darkTheme,
         home: const MainScreen(),
       ),
@@ -55,19 +55,20 @@ class _MainScreenState extends State<MainScreen> {
         children: _screens,
       ),
       bottomNavigationBar: NavigationBar(
+        height: 72,
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           setState(() => _selectedIndex = index);
         },
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'Dashboard',
+            icon: Icon(Icons.candlestick_chart_outlined),
+            selectedIcon: Icon(Icons.candlestick_chart),
+            label: 'Trading',
           ),
           NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
+            icon: Icon(Icons.tune_outlined),
+            selectedIcon: Icon(Icons.tune),
             label: 'Settings',
           ),
         ],
