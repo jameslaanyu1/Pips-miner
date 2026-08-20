@@ -36,6 +36,7 @@ jobs:
 
       - name: Generate Android project
         run: |
+          rm -rf android
           flutter create \
             --platforms=android \
             --android-language kotlin \
@@ -43,16 +44,173 @@ jobs:
             --org=com.pipsminer \
             .
 
-      - name: Set Android compile SDK
+      - name: Configure Android build and desugaring
         run: |
-          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          gradle = Path("android/app/build.gradle.kts")
+
+          if not gradle.exists():
+              raise SystemExit(
+                  "ERROR: android/app/build.gradle.kts was not generated"
+              )
+
+          text = gradle.read_text()
+
+          # ---------------------------------------------------------
+          # compileSdk
+          # ---------------------------------------------------------
+          text = re.sub(
+              r"compileSdk\s*=\s*flutter\.compileSdkVersion",
+              "compileSdk = 36",
+              text,
+              count=1,
+          )
+
+          if "compileSdk = 36" not in text:
+              raise SystemExit(
+                  "ERROR: compileSdk = 36 was not configured"
+              )
+
+          # ---------------------------------------------------------
+          # Remove any existing compileOptions block.
+          # ---------------------------------------------------------
+          text = re.sub(
+              r"(?ms)^[ \t]*compileOptions\s*\{.*?^[ \t]*\}\s*",
+              "",
+              text,
+              count=1,
+          )
+
+          # ---------------------------------------------------------
+          # Insert compileOptions DIRECTLY inside android { }.
+          # ---------------------------------------------------------
+          android = re.search(
+              r"(?m)^android\s*\{",
+              text,
+          )
+
+          if not android:
+              raise SystemExit(
+                  "ERROR: android { } block not found"
+              )
+
+          compile_options = """
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+                  isCoreLibraryDesugaringEnabled = true
+              }
+
+          """
+
+          text = (
+              text[:android.end()]
+              + compile_options
+              + text[android.end():]
+          )
+
+          # ---------------------------------------------------------
+          # Remove any previous desugaring dependency.
+          # ---------------------------------------------------------
+          text = re.sub(
+              r"(?m)^[ \t]*coreLibraryDesugaring\s*\(\s*"
+              r"['\"]com\.android\.tools:desugar_jdk_libs:[^'\"]+['\"]"
+              r"\s*\)\s*\n?",
+              "",
+              text,
+          )
+
+          dependency = (
+              '    coreLibraryDesugaring('
+              '"com.android.tools:desugar_jdk_libs:2.1.4")'
+          )
+
+          # ---------------------------------------------------------
+          # Add dependency to the existing dependencies block.
+          # If none exists, create one at top level.
+          # ---------------------------------------------------------
+          deps = re.search(
+              r"(?m)^dependencies\s*\{",
+              text,
+          )
+
+          if deps:
+              text = (
+                  text[:deps.end()]
+                  + "\n"
+                  + dependency
+                  + text[deps.end():]
+              )
+          else:
+              text = (
+                  text.rstrip()
+                  + "\n\n"
+                  + "dependencies {\n"
+                  + dependency
+                  + "\n}\n"
+              )
+
+          gradle.write_text(text)
+
+          # ---------------------------------------------------------
+          # HARD VERIFICATION BEFORE GRADLE RUNS
+          # ---------------------------------------------------------
+          verify = gradle.read_text()
+
+          required = [
+              "compileSdk = 36",
+              "sourceCompatibility = JavaVersion.VERSION_17",
+              "targetCompatibility = JavaVersion.VERSION_17",
+              "isCoreLibraryDesugaringEnabled = true",
+              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+          ]
+
+          missing = [
+              item for item in required
+              if item not in verify
+          ]
+
+          if missing:
+              raise SystemExit(
+                  "VERIFY FAILED: " + ", ".join(missing)
+              )
+
+          if verify.count(
+              "isCoreLibraryDesugaringEnabled = true"
+          ) != 1:
+              raise SystemExit(
+                  "VERIFY FAILED: desugaring flag is not exactly once"
+              )
+
+          if verify.count(
+              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+          ) != 1:
+              raise SystemExit(
+                  "VERIFY FAILED: desugaring dependency is not exactly once"
+              )
+
+          print("============================================")
+          print("PIPS MINER ANDROID BUILD CONFIG VERIFIED")
+          print("compileSdk = 36")
+          print("Java sourceCompatibility = 17")
+          print("Java targetCompatibility = 17")
+          print("core library desugaring = ENABLED")
+          print("desugar_jdk_libs = 2.1.4")
+          print("============================================")
+          PY
 
       - name: Configure Android foreground trading service
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          manifest = Path(
+              "android/app/src/main/AndroidManifest.xml"
+          )
+
           text = manifest.read_text()
 
           permissions = [
@@ -65,8 +223,8 @@ jobs:
           for permission in permissions:
               if permission not in text:
                   text = text.replace(
-                      '<application',
-                      permission + '\\n    <application',
+                      "<application",
+                      permission + "\n    <application",
                       1,
                   )
 
@@ -80,10 +238,13 @@ jobs:
           </service>
           '''
 
-          if 'id.flutter.flutter_background_service.BackgroundService' not in text:
+          if (
+              "id.flutter.flutter_background_service.BackgroundService"
+              not in text
+          ):
               text = text.replace(
-                  '</application>',
-                  service + '</application>',
+                  "</application>",
+                  service + "</application>",
                   1,
               )
 
