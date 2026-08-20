@@ -10,7 +10,7 @@ import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from user_auth import create_session, get_session
+from backend.user_auth import create_session, get_session
 
 app = Flask(__name__)
 
@@ -29,7 +29,11 @@ METAAPI_CLIENT_URL = os.environ.get(
 ).rstrip("/")
 DATABASE = os.environ.get(
     "PIPSMINER_DATABASE",
-    "/tmp/pips_miner.db" if os.environ.get("VERCEL") else "/app/data/pips_miner.db",
+    "/tmp/pips_miner.db" if os.environ.get("VERCEL") else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data",
+        "pips_miner.db",
+    ),
 )
 MAGIC = int(os.environ.get("PIPSMINER_MAGIC", "26081501"))
 CONNECT_LIMIT_SECONDS = int(os.environ.get("CONNECT_LIMIT_SECONDS", "60"))
