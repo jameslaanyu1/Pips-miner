@@ -55,41 +55,75 @@ jobs:
 
           if p.name == "build.gradle.kts":
               if "isCoreLibraryDesugaringEnabled = true" not in s:
+                  if "compileOptions {" not in s:
+                      raise SystemExit("ERROR: compileOptions block not found")
+
                   s = s.replace(
                       "compileOptions {",
-                      "compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17",
+                      """compileOptions {
+                  isCoreLibraryDesugaringEnabled = true
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17""",
                       1
                   )
 
               dependency = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")'
 
               if dependency not in s:
-                  s = s.replace(
-                      "dependencies {",
-                      "dependencies {\n    " + dependency,
-                      1
-                  )
+                  if "dependencies {" in s:
+                      s = s.replace(
+                          "dependencies {",
+                          "dependencies {\n    " + dependency,
+                          1
+                      )
+                  else:
+                      s += "\n\ndependencies {\n    " + dependency + "\n}\n"
 
           else:
               if "coreLibraryDesugaringEnabled true" not in s:
+                  if "compileOptions {" not in s:
+                      raise SystemExit("ERROR: compileOptions block not found")
+
                   s = s.replace(
                       "compileOptions {",
-                      "compileOptions {\n        coreLibraryDesugaringEnabled true\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17",
+                      """compileOptions {
+                  coreLibraryDesugaringEnabled true
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17""",
                       1
                   )
 
               dependency = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'"
 
               if dependency not in s:
-                  s = s.replace(
-                      "dependencies {",
-                      "dependencies {\n    " + dependency,
-                      1
-                  )
+                  if "dependencies {" in s:
+                      s = s.replace(
+                          "dependencies {",
+                          "dependencies {\n    " + dependency,
+                          1
+                      )
+                  else:
+                      s += "\n\ndependencies {\n    " + dependency + "\n}\n"
 
           p.write_text(s)
-          print(f"Core library desugaring configured in {p}")
+          print(f"Configured core library desugaring in {p}")
           PY2
+
+      - name: Verify desugaring configuration
+        run: |
+          echo "=== Generated Android Gradle files ==="
+          ls -la android/app/
+
+          if [ -f android/app/build.gradle.kts ]; then
+            echo "=== build.gradle.kts ==="
+            cat android/app/build.gradle.kts
+          elif [ -f android/app/build.gradle ]; then
+            echo "=== build.gradle ==="
+            cat android/app/build.gradle
+          else
+            echo "ERROR: No Android app Gradle file found"
+            exit 1
+          fi
 
       - name: Set Android app name to Pips Miner
         run: |
