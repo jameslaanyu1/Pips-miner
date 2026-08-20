@@ -55,73 +55,61 @@ jobs:
           gradle = Path("android/app/build.gradle.kts")
           text = gradle.read_text()
 
-          # Modify Flutter's EXISTING compileOptions block.
+          # Flutter generates ONE compileOptions block.
+          # Modify that existing block; never create a second one.
           match = re.search(
-              r"compileOptions\s*\{(?P<body>.*?)\n\s*\}",
+              r"compileOptions\s*\{[^{}]*\}",
               text,
               re.DOTALL,
           )
 
           if not match:
               raise SystemExit(
-                  "ERROR: Flutter-generated compileOptions block not found"
+                  "ERROR: generated compileOptions block not found"
               )
 
-          body = match.group("body")
-
-          body = re.sub(
-              r"\n\s*isCoreLibraryDesugaringEnabled\s*=\s*(true|false)",
-              "",
-              body,
-          )
-
-          body = re.sub(
-              r"sourceCompatibility\s*=\s*JavaVersion\.[A-Z0-9_]+",
-              "sourceCompatibility = JavaVersion.VERSION_17",
-              body,
-          )
-
-          body = re.sub(
-              r"targetCompatibility\s*=\s*JavaVersion\.[A-Z0-9_]+",
-              "targetCompatibility = JavaVersion.VERSION_17",
-              body,
-          )
-
-          if "sourceCompatibility" not in body:
-              body += "\n        sourceCompatibility = JavaVersion.VERSION_17"
-
-          if "targetCompatibility" not in body:
-              body += "\n        targetCompatibility = JavaVersion.VERSION_17"
-
-          body += "\n        isCoreLibraryDesugaringEnabled = true"
-
-          replacement_block = "compileOptions {" + body + "\n    }"
+          compile_options = """compileOptions {
+              sourceCompatibility = JavaVersion.VERSION_17
+              targetCompatibility = JavaVersion.VERSION_17
+              isCoreLibraryDesugaringEnabled = true
+          }"""
 
           text = (
               text[:match.start()]
-              + replacement_block
+              + compile_options
               + text[match.end():]
           )
 
-          # Remove any previous desugaring dependency, then add exactly one.
+          # Remove every previous desugaring dependency.
           text = re.sub(
-              r"\n\s*coreLibraryDesugaring\s*\([^\n]+\)",
+              r"\n\s*coreLibraryDesugaring\s*\(\s*['\"][^'\"]+['\"]\s*\)",
               "",
               text,
           )
 
-          if "dependencies {" not in text:
-              raise SystemExit(
-                  "ERROR: dependencies block not found"
-              )
-
-          text = text.replace(
-              "dependencies {",
-              'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")',
-              1,
+          # Find the REAL dependencies block and add exactly one dependency.
+          dependency_marker = re.search(
+              r"dependencies\s*\{",
+              text,
           )
 
-          # Force compile SDK 36.
+          if not dependency_marker:
+              raise SystemExit(
+                  "ERROR: generated dependencies block not found"
+              )
+
+          dependency = (
+              '\n    coreLibraryDesugaring('
+              '"com.android.tools:desugar_jdk_libs:2.1.4")'
+          )
+
+          text = (
+              text[:dependency_marker.end()]
+              + dependency
+              + text[dependency_marker.end():]
+          )
+
+          # flutter_local_notifications requires compileSdk 35+.
           text = re.sub(
               r"compileSdk\s*=\s*flutter\.compileSdkVersion",
               "compileSdk = 36",
@@ -131,7 +119,7 @@ jobs:
 
           gradle.write_text(text)
 
-          # HARD verification.
+          # HARD verification before Gradle is allowed to run.
           verify = gradle.read_text()
 
           if verify.count(
@@ -142,10 +130,20 @@ jobs:
               )
 
           if verify.count(
-              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")'
+              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
           ) != 1:
               raise SystemExit(
-                  "VERIFY FAILED: desugar_jdk_libs dependency is not exactly once"
+                  "VERIFY FAILED: desugaring dependency is not exactly once"
+              )
+
+          if "sourceCompatibility = JavaVersion.VERSION_17" not in verify:
+              raise SystemExit(
+                  "VERIFY FAILED: Java 17 sourceCompatibility missing"
+              )
+
+          if "targetCompatibility = JavaVersion.VERSION_17" not in verify:
+              raise SystemExit(
+                  "VERIFY FAILED: Java 17 targetCompatibility missing"
               )
 
           if "compileSdk = 36" not in verify:
@@ -154,11 +152,11 @@ jobs:
               )
 
           print("============================================")
-          print("ANDROID CONFIGURATION VERIFIED")
+          print("ANDROID BUILD CONFIG VERIFIED")
           print("compileSdk: 36")
           print("Java: 17")
           print("core library desugaring: ENABLED")
-          print("desugar_jdk_libs: 2.1.5")
+          print("desugar_jdk_libs: 2.1.4")
           print("============================================")
           PY
 
