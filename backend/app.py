@@ -27,7 +27,10 @@ METAAPI_CLIENT_URL = os.environ.get(
     "METAAPI_CLIENT_URL",
     "https://mt-client-api-v1.london.agiliumtrade.ai",
 ).rstrip("/")
-DATABASE = os.environ.get("PIPSMINER_DATABASE", "/app/data/pips_miner.db")
+DATABASE = os.environ.get(
+    "PIPSMINER_DATABASE",
+    "/tmp/pips_miner.db" if os.environ.get("VERCEL") else "/app/data/pips_miner.db",
+)
 MAGIC = int(os.environ.get("PIPSMINER_MAGIC", "26081501"))
 CONNECT_LIMIT_SECONDS = int(os.environ.get("CONNECT_LIMIT_SECONDS", "60"))
 
