@@ -38,6 +38,7 @@ jobs:
         run: |
           flutter create \
             --platforms=android \
+            --android-language kotlin \
             --project-name=pips_miner \
             --org=com.pipsminer \
             .
@@ -53,63 +54,15 @@ jobs:
           import re
 
           gradle = Path("android/app/build.gradle.kts")
+
+          if not gradle.exists():
+              raise SystemExit(
+                  "ERROR: android/app/build.gradle.kts was not generated"
+              )
+
           text = gradle.read_text()
 
-          # Flutter generates ONE compileOptions block.
-          # Modify that existing block; never create a second one.
-          match = re.search(
-              r"compileOptions\s*\{[^{}]*\}",
-              text,
-              re.DOTALL,
-          )
-
-          if not match:
-              raise SystemExit(
-                  "ERROR: generated compileOptions block not found"
-              )
-
-          compile_options = """compileOptions {
-              sourceCompatibility = JavaVersion.VERSION_17
-              targetCompatibility = JavaVersion.VERSION_17
-              isCoreLibraryDesugaringEnabled = true
-          }"""
-
-          text = (
-              text[:match.start()]
-              + compile_options
-              + text[match.end():]
-          )
-
-          # Remove every previous desugaring dependency.
-          text = re.sub(
-              r"\n\s*coreLibraryDesugaring\s*\(\s*['\"][^'\"]+['\"]\s*\)",
-              "",
-              text,
-          )
-
-          # Find the REAL dependencies block and add exactly one dependency.
-          dependency_marker = re.search(
-              r"dependencies\s*\{",
-              text,
-          )
-
-          if not dependency_marker:
-              raise SystemExit(
-                  "ERROR: generated dependencies block not found"
-              )
-
-          dependency = (
-              '\n    coreLibraryDesugaring('
-              '"com.android.tools:desugar_jdk_libs:2.1.4")'
-          )
-
-          text = (
-              text[:dependency_marker.end()]
-              + dependency
-              + text[dependency_marker.end():]
-          )
-
-          # flutter_local_notifications requires compileSdk 35+.
+          # Force compile SDK 36.
           text = re.sub(
               r"compileSdk\s*=\s*flutter\.compileSdkVersion",
               "compileSdk = 36",
@@ -117,10 +70,55 @@ jobs:
               count=1,
           )
 
+          # Remove a previous block created by this workflow.
+          text = re.sub(
+              r"\n// PIPS_MINER_DESUGARING_BEGIN.*?"
+              r"// PIPS_MINER_DESUGARING_END\n?",
+              "\n",
+              text,
+              flags=re.DOTALL,
+          )
+
+          # IMPORTANT:
+          # Use a separate Android configuration block so this cannot be
+          # lost or incorrectly replaced when Flutter regenerates the project.
+          forced = """
+// PIPS_MINER_DESUGARING_BEGIN
+android {
+    compileSdk = 36
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+// PIPS_MINER_DESUGARING_END
+"""
+
+          text = text.rstrip() + "\n" + forced
           gradle.write_text(text)
 
-          # HARD verification before Gradle is allowed to run.
           verify = gradle.read_text()
+
+          required = [
+              "compileSdk = 36",
+              "sourceCompatibility = JavaVersion.VERSION_17",
+              "targetCompatibility = JavaVersion.VERSION_17",
+              "isCoreLibraryDesugaringEnabled = true",
+              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+          ]
+
+          missing = [x for x in required if x not in verify]
+
+          if missing:
+              raise SystemExit(
+                  "VERIFY FAILED: " + ", ".join(missing)
+              )
 
           if verify.count(
               "isCoreLibraryDesugaringEnabled = true"
@@ -136,23 +134,8 @@ jobs:
                   "VERIFY FAILED: desugaring dependency is not exactly once"
               )
 
-          if "sourceCompatibility = JavaVersion.VERSION_17" not in verify:
-              raise SystemExit(
-                  "VERIFY FAILED: Java 17 sourceCompatibility missing"
-              )
-
-          if "targetCompatibility = JavaVersion.VERSION_17" not in verify:
-              raise SystemExit(
-                  "VERIFY FAILED: Java 17 targetCompatibility missing"
-              )
-
-          if "compileSdk = 36" not in verify:
-              raise SystemExit(
-                  "VERIFY FAILED: compileSdk 36 missing"
-              )
-
           print("============================================")
-          print("ANDROID BUILD CONFIG VERIFIED")
+          print("PIPS MINER ANDROID CONFIG VERIFIED")
           print("compileSdk: 36")
           print("Java: 17")
           print("core library desugaring: ENABLED")
@@ -160,6 +143,9 @@ jobs:
           print("============================================")
           PY
 
+          echo "===== FINAL GENERATED APP GRADLE ====="
+          cat android/app/build.gradle.kts
+          echo "======================================"
       - name: Configure Android foreground trading service
         run: |
           python3 - <<'PY'
