@@ -56,53 +56,132 @@ jobs:
           gradle = Path("android/app/build.gradle.kts")
 
           if not gradle.exists():
-              raise SystemExit(
-                  "ERROR: android/app/build.gradle.kts was not generated"
-              )
+              raise SystemExit("ERROR: android/app/build.gradle.kts was not generated")
 
           text = gradle.read_text()
 
-          # Force compile SDK 36.
-          text = re.sub(
-              r"compileSdk\s*=\s*flutter\.compileSdkVersion",
-              "compileSdk = 36",
-              text,
+          def find_block(text, name, start=0):
+              m = re.search(r'(?m)^[ \t]*' + re.escape(name) + r'\s*\{', text[start:])
+              if not m:
+                  return None
+
+              block_start = start + m.start()
+              brace_start = start + m.end() - 1
+
+              depth = 0
+              in_string = False
+              escaped = False
+
+              for i in range(brace_start, len(text)):
+                  c = text[i]
+
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif c == '\\\\':
+                          escaped = True
+                      elif c == '"':
+                          in_string = False
+                      continue
+
+                  if c == '"':
+                      in_string = True
+                  elif c == '{':
+                      depth += 1
+                  elif c == '}':
+                      depth -= 1
+                      if depth == 0:
+                          return block_start, i + 1
+
+              raise SystemExit("ERROR: unmatched braces in " + name + " block")
+
+          # ------------------------------------------------------------
+          # 1. Modify the EXISTING android { } block.
+          # ------------------------------------------------------------
+          android_range = find_block(text, "android")
+
+          if not android_range:
+              raise SystemExit("ERROR: android { } block not found")
+
+          a_start, a_end = android_range
+          android_block = text[a_start:a_end]
+
+          android_block = re.sub(
+              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+              'compileSdk = 36',
+              android_block,
               count=1,
           )
 
-          # Remove a previous block created by this workflow.
-          text = re.sub(
-              r"\n// PIPS_MINER_DESUGARING_BEGIN.*?"
-              r"// PIPS_MINER_DESUGARING_END\n?",
-              "\n",
-              text,
-              flags=re.DOTALL,
+          if 'compileSdk = 36' not in android_block:
+              raise SystemExit("ERROR: could not set compileSdk = 36")
+
+          # Find the existing compileOptions block INSIDE android.
+          co = find_block(android_block, "compileOptions")
+
+          if co:
+              c_start, c_end = co
+              compile_options = """compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+                  isCoreLibraryDesugaringEnabled = true
+              }"""
+
+              android_block = (
+                  android_block[:c_start]
+                  + compile_options
+                  + android_block[c_end:]
+              )
+          else:
+              insertion = """\n
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+                  isCoreLibraryDesugaringEnabled = true
+              }
+              """
+
+              # Insert before the final } of android { }.
+              android_block = (
+                  android_block[:-1]
+                  + insertion
+                  + "}"
+              )
+
+          text = text[:a_start] + android_block + text[a_end:]
+
+          # ------------------------------------------------------------
+          # 2. Modify the EXISTING dependencies { } block.
+          # ------------------------------------------------------------
+          dep = find_block(text, "dependencies")
+
+          if not dep:
+              raise SystemExit("ERROR: dependencies { } block not found")
+
+          d_start, d_end = dep
+          dependencies = text[d_start:d_end]
+
+          # Remove any previous desugaring dependency.
+          dependencies = re.sub(
+              r'[ \t]*coreLibraryDesugaring\s*\(\s*"com\.android\.tools:desugar_jdk_libs:[^"]+"\s*\)\s*\n?',
+              '',
+              dependencies,
           )
 
-          # IMPORTANT:
-          # Use a separate Android configuration block so this cannot be
-          # lost or incorrectly replaced when Flutter regenerates the project.
-          forced = """
-// PIPS_MINER_DESUGARING_BEGIN
-android {
-    compileSdk = 36
+          # Insert exactly one dependency immediately after dependencies {.
+          dependencies = (
+              dependencies[:dependencies.find("{") + 1]
+              + '\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+              + dependencies[dependencies.find("{") + 1:]
+          )
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-        isCoreLibraryDesugaringEnabled = true
-    }
-}
+          text = text[:d_start] + dependencies + text[d_end:]
 
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-}
-// PIPS_MINER_DESUGARING_END
-"""
-
-          text = text.rstrip() + "\n" + forced
           gradle.write_text(text)
 
+          # ------------------------------------------------------------
+          # 3. HARD verification.
+          # ------------------------------------------------------------
           verify = gradle.read_text()
 
           required = [
@@ -120,9 +199,7 @@ dependencies {
                   "VERIFY FAILED: " + ", ".join(missing)
               )
 
-          if verify.count(
-              "isCoreLibraryDesugaringEnabled = true"
-          ) != 1:
+          if verify.count("isCoreLibraryDesugaringEnabled = true") != 1:
               raise SystemExit(
                   "VERIFY FAILED: desugaring flag is not exactly once"
               )
@@ -141,11 +218,12 @@ dependencies {
           print("core library desugaring: ENABLED")
           print("desugar_jdk_libs: 2.1.4")
           print("============================================")
+
+          print("===== FINAL APP BUILD.GRADLE.KTS =====")
+          print(verify)
+          print("=======================================")
           PY
 
-          echo "===== FINAL GENERATED APP GRADLE ====="
-          cat android/app/build.gradle.kts
-          echo "======================================"
       - name: Configure Android foreground trading service
         run: |
           python3 - <<'PY'
