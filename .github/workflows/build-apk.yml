@@ -11,7 +11,7 @@ on:
       - ".github/workflows/build-apk.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-apk:
@@ -34,227 +34,61 @@ jobs:
       - name: Show Flutter version
         run: flutter --version
 
-      - name: Ensure persistent Android project
+      - name: Generate Android project
         run: |
-          if [ -f android/settings.gradle.kts ] && [ -f android/app/build.gradle.kts ]; then
-            echo "============================================"
-            echo "PERSISTENT ANDROID PROJECT FOUND"
-            echo "Skipping flutter create."
-            echo "============================================"
-          else
-            echo "============================================"
-            echo "ANDROID PROJECT NOT FOUND"
-            echo "Generating it once."
-            echo "============================================"
-
-            flutter create \
-              --platforms=android \
-              --android-language kotlin \
-              --project-name=pips_miner \
-              --org=com.pipsminer \
-              .
-          fi
+          flutter create \
+            --platforms=android \
+            --android-language kotlin \
+            --project-name=pips_miner \
+            --org=com.pipsminer \
+            .
 
       - name: Set Android compile SDK
         run: |
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
 
-      - name: Configure Android build and core library desugaring
+      - name: Configure Android foreground trading service
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
-          gradle = Path("android/app/build.gradle.kts")
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
 
-          if not gradle.exists():
-              raise SystemExit("ERROR: android/app/build.gradle.kts was not generated")
-
-          text = gradle.read_text()
-
-          def find_block(text, name, start=0):
-              m = re.search(r'(?m)^[ \t]*' + re.escape(name) + r'\s*\{', text[start:])
-              if not m:
-                  return None
-
-              block_start = start + m.start()
-              brace_start = start + m.end() - 1
-
-              depth = 0
-              in_string = False
-              escaped = False
-
-              for i in range(brace_start, len(text)):
-                  c = text[i]
-
-                  if in_string:
-                      if escaped:
-                          escaped = False
-                      elif c == '\\\\':
-                          escaped = True
-                      elif c == '"':
-                          in_string = False
-                      continue
-
-                  if c == '"':
-                      in_string = True
-                  elif c == '{':
-                      depth += 1
-                  elif c == '}':
-                      depth -= 1
-                      if depth == 0:
-                          return block_start, i + 1
-
-              raise SystemExit("ERROR: unmatched braces in " + name + " block")
-
-          # ------------------------------------------------------------
-          # 1. Modify the EXISTING android { } block.
-          # ------------------------------------------------------------
-          android_range = find_block(text, "android")
-
-          if not android_range:
-              raise SystemExit("ERROR: android { } block not found")
-
-          a_start, a_end = android_range
-          android_block = text[a_start:a_end]
-
-          android_block = re.sub(
-              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
-              'compileSdk = 36',
-              android_block,
-              count=1,
-          )
-
-          if 'compileSdk = 36' not in android_block:
-              raise SystemExit("ERROR: could not set compileSdk = 36")
-
-          # Find the existing compileOptions block INSIDE android.
-          co = find_block(android_block, "compileOptions")
-
-          if co:
-              c_start, c_end = co
-              compile_options = """compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-                  isCoreLibraryDesugaringEnabled = true
-              }"""
-
-              android_block = (
-                  android_block[:c_start]
-                  + compile_options
-                  + android_block[c_end:]
-              )
-          else:
-              insertion = """\n
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-                  isCoreLibraryDesugaringEnabled = true
-              }
-              """
-
-              # Insert before the final } of android { }.
-              android_block = (
-                  android_block[:-1]
-                  + insertion
-                  + "}"
-              )
-
-          text = text[:a_start] + android_block + text[a_end:]
-
-          # ------------------------------------------------------------
-          # 2. Modify the EXISTING dependencies { } block.
-          # ------------------------------------------------------------
-          dep = find_block(text, "dependencies")
-
-          if not dep:
-              raise SystemExit("ERROR: dependencies { } block not found")
-
-          d_start, d_end = dep
-          dependencies = text[d_start:d_end]
-
-          # Remove any previous desugaring dependency.
-          dependencies = re.sub(
-              r'[ \t]*coreLibraryDesugaring\s*\(\s*"com\.android\.tools:desugar_jdk_libs:[^"]+"\s*\)\s*\n?',
-              '',
-              dependencies,
-          )
-
-          # Insert exactly one dependency immediately after dependencies {.
-          dependencies = (
-              dependencies[:dependencies.find("{") + 1]
-              + '\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
-              + dependencies[dependencies.find("{") + 1:]
-          )
-
-          text = text[:d_start] + dependencies + text[d_end:]
-
-          gradle.write_text(text)
-
-          # ------------------------------------------------------------
-          # 3. HARD verification.
-          # ------------------------------------------------------------
-          verify = gradle.read_text()
-
-          required = [
-              "compileSdk = 36",
-              "sourceCompatibility = JavaVersion.VERSION_17",
-              "targetCompatibility = JavaVersion.VERSION_17",
-              "isCoreLibraryDesugaringEnabled = true",
-              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+          permissions = [
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
+              '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
+              '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+              '<uses-permission android:name="android.permission.WAKE_LOCK" />',
           ]
 
-          missing = [x for x in required if x not in verify]
+          for permission in permissions:
+              if permission not in text:
+                  text = text.replace(
+                      '<application',
+                      permission + '\\n    <application',
+                      1,
+                  )
 
-          if missing:
-              raise SystemExit(
-                  "VERIFY FAILED: " + ", ".join(missing)
+          service = '''    <service
+              android:name="id.flutter.flutter_background_service.BackgroundService"
+              android:exported="false"
+              android:foregroundServiceType="specialUse">
+              <property
+                  android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                  android:value="continuous user-initiated MT5 trading engine execution" />
+          </service>
+          '''
+
+          if 'id.flutter.flutter_background_service.BackgroundService' not in text:
+              text = text.replace(
+                  '</application>',
+                  service + '</application>',
+                  1,
               )
 
-          if verify.count("isCoreLibraryDesugaringEnabled = true") != 1:
-              raise SystemExit(
-                  "VERIFY FAILED: desugaring flag is not exactly once"
-              )
-
-          if verify.count(
-              'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
-          ) != 1:
-              raise SystemExit(
-                  "VERIFY FAILED: desugaring dependency is not exactly once"
-              )
-
-          print("============================================")
-          print("PIPS MINER ANDROID CONFIG VERIFIED")
-          print("compileSdk: 36")
-          print("Java: 17")
-          print("core library desugaring: ENABLED")
-          print("desugar_jdk_libs: 2.1.4")
-          print("============================================")
-
-          print("===== FINAL APP BUILD.GRADLE.KTS =====")
-          print(verify)
-          print("=======================================")
+          manifest.write_text(text)
           PY
-
-      - name: Persist Android project and configuration
-        working-directory: .
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add mobile_app/android
-
-          if git diff --cached --quiet; then
-            echo "Android project already persisted; nothing to commit."
-          else
-            git commit -m "Persist Android project for stable APK builds"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-
-            echo "============================================"
-            echo "ANDROID PROJECT PERSISTED TO GIT"
-            echo "Future builds will reuse it directly."
-            echo "============================================"
-          fi
 
       - name: Install dependencies
         run: flutter pub get

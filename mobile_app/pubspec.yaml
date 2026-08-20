@@ -42,7 +42,6 @@ dependencies:
   equatable: ^2.0.5
   
   # Notifications
-  flutter_local_notifications: ^17.2.3
   
   # Background Tasks
   flutter_background_service: ^5.1.0
