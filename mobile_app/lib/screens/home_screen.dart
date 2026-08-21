@@ -24,6 +24,8 @@ class HomeScreen extends StatelessWidget {
                       _header(bot),
                       const SizedBox(height: 18),
                       _accountCard(bot),
+                      const SizedBox(height: 10),
+                      _accountModeSelector(bot),
                       const SizedBox(height: 14),
                       _marketCard(bot),
                       const SizedBox(height: 14),
@@ -163,7 +165,7 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '\$${bot.balance.toStringAsFixed(2)}',
+            'Ksh ${bot.balance.toStringAsFixed(2)}',
             style: const TextStyle(
               fontSize: 34,
               fontWeight: FontWeight.w900,
@@ -176,7 +178,7 @@ class HomeScreen extends StatelessWidget {
               Expanded(
                 child: _metric(
                   'P/L',
-                  '${bot.profitLoss >= 0 ? '+' : ''}${bot.profitLoss.toStringAsFixed(2)}',
+                  'Ksh ${bot.profitLoss >= 0 ? '+' : ''}${bot.profitLoss.toStringAsFixed(2)}',
                   bot.profitLoss >= 0
                       ? AppTheme.successColor
                       : AppTheme.errorColor,
@@ -197,6 +199,76 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _accountModeSelector(BotProvider bot) {
+    final live = bot.isLiveAccount;
+
+    return _panel(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.shield_outlined,
+            size: 18,
+            color: AppTheme.primaryColor,
+          ),
+          const SizedBox(width: 9),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ACCOUNT MODE',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Select trading environment',
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 9,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment<bool>(
+                value: false,
+                label: Text('DEMO'),
+              ),
+              ButtonSegment<bool>(
+                value: true,
+                label: Text('LIVE'),
+              ),
+            ],
+            selected: {live},
+            onSelectionChanged: bot.isBotRunning
+                ? null
+                : (selection) {
+                    if (selection.isNotEmpty) {
+                      bot.setAccountMode(selection.first);
+                    }
+                  },
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: const WidgetStatePropertyAll(
+                TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
           ),
         ],
       ),
