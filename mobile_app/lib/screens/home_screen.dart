@@ -146,7 +146,7 @@ class HomeScreen extends StatelessWidget {
               const Text(
                 'ACCOUNT EQUITY',
                 style: TextStyle(
-                  color: Colors.white45,
+                  color: Colors.white.withOpacity(.45),
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.2,
@@ -421,7 +421,7 @@ class HomeScreen extends StatelessWidget {
               const Text(
                 'ACTIVE POSITION',
                 style: TextStyle(
-                  color: Colors.white45,
+                  color: Colors.white.withOpacity(.45),
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1,
