@@ -213,6 +213,14 @@ jobs:
 
           text = manifest.read_text()
 
+          if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
+              text = text.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
+                  'xmlns:tools="http://schemas.android.com/tools"',
+                  1,
+              )
+
           permissions = [
               '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
               '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
@@ -232,7 +240,8 @@ jobs:
           service = '''    <service
               android:name="id.flutter.flutter_background_service.BackgroundService"
               android:exported="false"
-              android:foregroundServiceType="specialUse">
+              android:foregroundServiceType="specialUse"
+              tools:replace="android:exported">
               <property
                   android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                   android:value="continuous user-initiated MT5 trading engine execution" />
