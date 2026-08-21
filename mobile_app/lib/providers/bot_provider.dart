@@ -311,20 +311,121 @@ class BotProvider extends ChangeNotifier {
   }
 
   Future<void> stopBot() async {
-    final service = FlutterBackgroundService();
-
-    if (await service.isRunning()) {
-      service.invoke('stopService');
-    }
-
-    _isBotRunning = false;
     _engineError = null;
     _updateTimer?.cancel();
 
-    await Future<void>.delayed(const Duration(milliseconds: 250));
+    final service = FlutterBackgroundService();
 
-    await _fetchBotStatus();
+    // Stop the Android trading engine first so it cannot intentionally
+    // create another position/order while the account is being flattened.
+    if (await service.isRunning()) {
+      service.invoke('stopService');
+
+      // Give the background isolate time to receive stopService and stop
+      // the engine before we begin closing/cancelling account state.
+      for (int attempt = 0; attempt < 30; attempt++) {
+        await Future<void>.delayed(
+          const Duration(milliseconds: 100),
+        );
+
+        if (!await service.isRunning()) {
+          break;
+        }
+      }
+    }
+
+    // Reuse the authenticated Pips-Miner session held by this dashboard.
+    if (_api == null) {
+      await connect();
+    }
+
+    final api = _api;
+
+    if (api == null || !_isConnected) {
+      _isBotRunning = false;
+      _engineError =
+          'Miner stopped, but the server session is unavailable to verify or close account orders.';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      await _liquidateAccount(api);
+
+      _isBotRunning = false;
+      _engineError = null;
+
+      await _fetchBotStatus();
+    } catch (e) {
+      _isBotRunning = false;
+      _engineError =
+          'Miner stopped, but account cleanup was incomplete: $e';
+    }
+
     notifyListeners();
+  }
+
+  Future<void> _liquidateAccount(MetaApiService api) async {
+    Object? lastError;
+
+    // Repeat because MetaApi/MT5 terminal state is asynchronous.
+    for (int attempt = 0; attempt < 3; attempt++) {
+      final positions = await api.positions();
+      final orders = await api.orders();
+
+      for (final raw in positions) {
+        if (raw is! Map) continue;
+
+        final position = Map<String, dynamic>.from(raw);
+        final id = position['id']?.toString();
+
+        if (id == null || id.isEmpty) continue;
+
+        try {
+          await api.closePosition(id);
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      for (final raw in orders) {
+        if (raw is! Map) continue;
+
+        final order = Map<String, dynamic>.from(raw);
+        final id = order['id']?.toString();
+
+        if (id == null || id.isEmpty) continue;
+
+        try {
+          await api.cancelOrder(id);
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      await Future<void>.delayed(
+        const Duration(milliseconds: 500),
+      );
+
+      final remainingPositions = await api.positions();
+      final remainingOrders = await api.orders();
+
+      if (remainingPositions.isEmpty && remainingOrders.isEmpty) {
+        return;
+      }
+    }
+
+    final remainingPositions = await api.positions();
+    final remainingOrders = await api.orders();
+
+    if (remainingPositions.isNotEmpty ||
+        remainingOrders.isNotEmpty) {
+      throw Exception(
+        'remaining positions=${remainingPositions.length}, '
+        'pending orders=${remainingOrders.length}'
+        '${lastError == null ? '' : '; last error: $lastError'}',
+      );
+    }
   }
 
   void _startUpdates() {

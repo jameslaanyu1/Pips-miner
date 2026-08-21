@@ -422,63 +422,147 @@ class HomeScreen extends StatelessWidget {
   Widget _botControl(BotProvider bot) {
     final running = bot.isBotRunning;
 
-    return GestureDetector(
-      onTap: () {
-        if (running) {
-          bot.stopBot();
-        } else {
-          bot.startBot();
-        }
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        height: 76,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: running
-                ? [
-                    AppTheme.errorColor.withOpacity(.22),
-                    AppTheme.errorColor.withOpacity(.08),
-                  ]
-                : [
-                    AppTheme.accentColor.withOpacity(.22),
-                    AppTheme.accentColor.withOpacity(.07),
-                  ],
-          ),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: running
-                ? AppTheme.errorColor.withOpacity(.45)
-                : AppTheme.accentColor.withOpacity(.45),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              running
-                  ? Icons.stop_circle_outlined
-                  : Icons.play_circle_outline_rounded,
-              size: 31,
-              color: running
-                  ? AppTheme.errorColor
-                  : AppTheme.accentColor,
-            ),
-            const SizedBox(width: 12),
-            Text(
-              running ? 'STOP MINER' : 'START MINER',
-              style: TextStyle(
-                color: running
-                    ? AppTheme.errorColor
-                    : AppTheme.accentColor,
-                fontWeight: FontWeight.w900,
-                fontSize: 16,
-                letterSpacing: 1.3,
+    return Row(
+      children: [
+        Expanded(
+          child: GestureDetector(
+            onTap: running
+                ? null
+                : () {
+                    bot.startBot();
+                  },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              height: 76,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: running
+                      ? [
+                          AppTheme.successColor.withOpacity(.30),
+                          AppTheme.successColor.withOpacity(.10),
+                        ]
+                      : [
+                          AppTheme.accentColor.withOpacity(.22),
+                          AppTheme.accentColor.withOpacity(.07),
+                        ],
+                ),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: running
+                      ? AppTheme.successColor.withOpacity(.65)
+                      : AppTheme.accentColor.withOpacity(.45),
+                ),
+                boxShadow: running
+                    ? [
+                        BoxShadow(
+                          color:
+                              AppTheme.successColor.withOpacity(.18),
+                          blurRadius: 18,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.play_circle_outline_rounded,
+                    size: 28,
+                    color: running
+                        ? AppTheme.successColor
+                        : AppTheme.accentColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'START MINER',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: running
+                            ? AppTheme.successColor
+                            : AppTheme.accentColor,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: GestureDetector(
+            onTap: running
+                ? () {
+                    bot.stopBot();
+                  }
+                : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              height: 76,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.errorColor.withOpacity(
+                      running ? .30 : .12,
+                    ),
+                    AppTheme.errorColor.withOpacity(
+                      running ? .10 : .04,
+                    ),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: AppTheme.errorColor.withOpacity(
+                    running ? .65 : .25,
+                  ),
+                ),
+                boxShadow: running
+                    ? [
+                        BoxShadow(
+                          color:
+                              AppTheme.errorColor.withOpacity(.18),
+                          blurRadius: 18,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.stop_circle_outlined,
+                    size: 28,
+                    color: AppTheme.errorColor.withOpacity(
+                      running ? 1.0 : .45,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'STOP MINER',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppTheme.errorColor.withOpacity(
+                          running ? 1.0 : .45,
+                        ),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
