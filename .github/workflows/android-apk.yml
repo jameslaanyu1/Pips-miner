@@ -125,6 +125,39 @@ jobs:
             exit 1
           fi
 
+      - name: Fix background service manifest
+        run: |
+          python - <<'PY2'
+          from pathlib import Path
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+
+          if 'xmlns:tools="http://schemas.android.com/tools"' not in s:
+              s = s.replace(
+                  'xmlns:android="http://schemas.android.com/apk/res/android"',
+                  'xmlns:android="http://schemas.android.com/apk/res/android" '
+                  'xmlns:tools="http://schemas.android.com/tools"',
+                  1
+              )
+
+          target = 'android:name="id.flutter.flutter_background_service.BackgroundService"'
+
+          if target in s and 'tools:replace="android:exported"' not in s:
+              s = s.replace(
+                  target,
+                  target + ' tools:replace="android:exported"',
+                  1
+              )
+
+          p.write_text(s)
+
+          print("=== BackgroundService manifest ===")
+          for line in s.splitlines():
+              if "BackgroundService" in line:
+                  print(line)
+          PY2
+
       - name: Set Android app name to Pips Miner
         run: |
           python - <<'PY2'
