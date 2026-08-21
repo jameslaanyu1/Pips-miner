@@ -108,37 +108,39 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final token = await _storage.getMetaApiToken();
-      final accountId = await _storage.getMetaApiAccountId();
-      final region = await _storage.getMetaApiRegion();
+      final sessionToken =
+          await _storage.getPipsMinerSessionToken();
+      final accountId =
+          await _storage.getPipsMinerAccountId();
 
-      if (token == null ||
-          token.trim().isEmpty ||
+      if (sessionToken == null ||
+          sessionToken.trim().isEmpty ||
           accountId == null ||
           accountId.trim().isEmpty) {
         _isConnected = false;
-        _connectionError = 'MetaApi credentials are not configured.';
+        _connectionError =
+            'MT5 account is not connected. Connect the account first.';
         notifyListeners();
         return;
       }
 
       _api = MetaApiService(
-        token: token.trim(),
+        token: sessionToken.trim(),
         accountId: accountId.trim(),
-        region: region?.trim().isNotEmpty == true ? region!.trim() : 'new-york',
       );
 
-      await _api!.accountInformation();
+      final info = await _api!.accountInformation();
 
       _isConnected = true;
       _connectionError = null;
+      _balance = _number(info['balance']) ?? _balance;
 
       await _fetchBotStatus();
       notifyListeners();
     } catch (e) {
       _isConnected = false;
       _connectionError = _friendlyConnectionError(e);
-      debugPrint('Pips-Miner MetaApi connection error: $e');
+      debugPrint('Pips-Miner connection error: $e');
       notifyListeners();
     }
   }
@@ -152,100 +154,87 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final token = await _storage.getMetaApiToken();
-      final accountId = await _storage.getMetaApiAccountId();
-
-      if (token == null ||
-          token.trim().isEmpty ||
-          accountId == null ||
-          accountId.trim().isEmpty) {
-        throw Exception(
-          'MetaApi credentials have not been configured for this app.',
-        );
-      }
-
-      final provisioning = MetaApiService(
-        token: token.trim(),
-        accountId: accountId.trim(),
-      );
-
-      // Resolve the MetaApi account from the token + MT5 credentials.
-      // This prevents a stale/mismatched stored account ID from causing
-      // "Configuration token does not match the account id".
-      final accounts = await provisioning.accounts();
-
       final requestedLogin = login.trim();
+      final requestedPassword = password;
       final requestedServer = server.trim();
 
-      Map<String, dynamic>? matchedAccount;
-
-      for (final item in accounts) {
-        if (item is! Map) continue;
-
-        final candidate = Map<String, dynamic>.from(item);
-        final candidateLogin = candidate['login']?.toString().trim() ?? '';
-        final candidateServer = candidate['server']?.toString().trim() ?? '';
-
-        if (candidateLogin == requestedLogin &&
-            candidateServer.toLowerCase() == requestedServer.toLowerCase()) {
-          matchedAccount = candidate;
-          break;
-        }
-      }
-
-      if (matchedAccount == null) {
+      if (requestedLogin.isEmpty ||
+          requestedPassword.isEmpty ||
+          requestedServer.isEmpty) {
         throw Exception(
-          'No MetaApi account matches MT5 account '
-          '$requestedLogin on server $requestedServer.',
+          'MT5 login, password and broker server are required.',
         );
       }
 
-      final resolvedAccountId =
-          (matchedAccount['_id'] ??
-                  matchedAccount['id'] ??
-                  matchedAccount['accountId'])
-              ?.toString()
-              .trim() ??
-          '';
+      final response = await http.post(
+        Uri.parse(
+          'https://pips-miner-backend.vercel.app/api/v1/connect',
+        ),
+        headers: const {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'login': requestedLogin,
+          'password': requestedPassword,
+          'server': requestedServer,
+          'platform': 'mt5',
+        }),
+      );
 
-      if (resolvedAccountId.isEmpty) {
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300) {
+        String message = response.body;
+
+        try {
+          final decoded = jsonDecode(response.body);
+
+          if (decoded is Map<String, dynamic> &&
+              decoded['error'] != null) {
+            message = decoded['error'].toString();
+          }
+        } catch (_) {}
+
+        throw Exception(message);
+      }
+
+      final decoded = jsonDecode(response.body);
+
+      if (decoded is! Map<String, dynamic>) {
+        throw Exception('Invalid Pips-Miner connection response.');
+      }
+
+      final sessionToken =
+          decoded['sessionToken']?.toString().trim() ?? '';
+      final accountId =
+          decoded['accountId']?.toString().trim() ?? '';
+
+      if (sessionToken.isEmpty || accountId.isEmpty) {
         throw Exception(
-          'MetaApi returned the matching account without an account ID.',
+          'Pips-Miner did not return a valid trading session.',
         );
       }
 
-      final region = matchedAccount['region']?.toString().trim() ?? 'new-york';
-
-      final api = MetaApiService(
-        token: token.trim(),
-        accountId: resolvedAccountId,
-        region: region.isEmpty ? 'new-york' : region,
+      await _storage.savePipsMinerSession(
+        sessionToken: sessionToken,
+        accountId: accountId,
       );
-
-      // Persist the account ID that actually belongs to this token.
-      await _storage.saveMetaApiCredentials(
-        token: token.trim(),
-        accountId: resolvedAccountId,
-        region: region.isEmpty ? 'new-york' : region,
-      );
-
-      await api.configureCredentials(login: login.trim(), password: password);
-
-      await api.deploy();
-
-      _api = api;
-
-      // Deployment can finish before the MetaApi trading terminal/API
-      // becomes ready. Wait instead of failing immediately.
-      await api.waitUntilReady();
 
       await _storage.saveMt5Connection(
-        login: login.trim(),
-        server: server.trim(),
+        login: requestedLogin,
+        server: requestedServer,
       );
+
+      _api = MetaApiService(
+        token: sessionToken,
+        accountId: accountId,
+      );
+
+      final info = await _api!.accountInformation();
 
       _isConnected = true;
       _connectionError = null;
+      _balance = _number(info['balance']) ?? _balance;
 
       await _fetchBotStatus();
       notifyListeners();
@@ -253,7 +242,7 @@ class BotProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _isConnected = false;
-      _connectionError = e.toString().replaceFirst('Exception: ', '');
+      _connectionError = _friendlyConnectionError(e);
       notifyListeners();
       return false;
     }

@@ -73,22 +73,24 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
   try {
     final storage = SecureStorageService();
 
-    final token = await storage.getMetaApiToken();
-    final accountId = await storage.getMetaApiAccountId();
-    final region = await storage.getMetaApiRegion();
+    // The Android trading isolate uses the same authenticated
+    // Pips-Miner backend session as the dashboard.
+    final token = await storage.getPipsMinerSessionToken();
+    final accountId = await storage.getPipsMinerAccountId();
     final storedSymbol = await storage.getTradingSymbol();
 
     if (token == null ||
         token.trim().isEmpty ||
         accountId == null ||
         accountId.trim().isEmpty) {
-      throw Exception('MetaApi credentials are not configured.');
+      throw Exception(
+        'Pips-Miner trading session is not configured. Connect the MT5 account first.',
+      );
     }
 
     api = MetaApiService(
       token: token.trim(),
       accountId: accountId.trim(),
-      region: region?.trim().isNotEmpty == true ? region!.trim() : 'new-york',
     );
 
     final symbol = storedSymbol?.trim().isNotEmpty == true
@@ -132,8 +134,8 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
   });
 
   try {
-    // The foreground isolate must also verify MetaApi readiness because
-    // Android can start this service independently of the dashboard.
+    // The foreground isolate must also verify Pips-Miner backend readiness
+    // because Android can start this service independently of the dashboard.
     await api.waitUntilReady();
     await engine.start();
 

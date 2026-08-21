@@ -3,47 +3,48 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class SecureStorageService {
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
-  static const String _metaApiTokenKey = 'metaapi_api_token';
-  static const String _metaApiAccountIdKey = 'metaapi_account_id';
-  static const String _metaApiRegionKey = 'metaapi_region';
+  static const String _pipsMinerSessionTokenKey = 'pips_miner_session_token';
+  static const String _pipsMinerAccountIdKey = 'pips_miner_account_id';
 
   static const String _tradingSymbolKey = 'trading_symbol';
   static const String _mt5LoginKey = 'mt5_login';
   static const String _mt5ServerKey = 'mt5_server';
 
-  Future<void> saveMetaApiCredentials({
-    required String token,
+  Future<void> savePipsMinerSession({
+    required String sessionToken,
     required String accountId,
-    String? region,
   }) async {
-    await _storage.write(key: _metaApiTokenKey, value: token.trim());
-    await _storage.write(key: _metaApiAccountIdKey, value: accountId.trim());
-
-    if (region != null && region.trim().isNotEmpty) {
-      await _storage.write(key: _metaApiRegionKey, value: region.trim());
-    }
+    await _storage.write(
+      key: _pipsMinerSessionTokenKey,
+      value: sessionToken.trim(),
+    );
+    await _storage.write(
+      key: _pipsMinerAccountIdKey,
+      value: accountId.trim(),
+    );
   }
 
-  Future<String?> getMetaApiToken() async {
-    return _storage.read(key: _metaApiTokenKey);
+  Future<String?> getPipsMinerSessionToken() async {
+    return _storage.read(key: _pipsMinerSessionTokenKey);
   }
 
-  Future<String?> getMetaApiAccountId() async {
-    return _storage.read(key: _metaApiAccountIdKey);
+  Future<String?> getPipsMinerAccountId() async {
+    return _storage.read(key: _pipsMinerAccountIdKey);
   }
 
-  Future<String?> getMetaApiRegion() async {
-    return _storage.read(key: _metaApiRegionKey);
-  }
-
-  Future<bool> hasMetaApiCredentials() async {
-    final token = await getMetaApiToken();
-    final accountId = await getMetaApiAccountId();
+  Future<bool> hasPipsMinerSession() async {
+    final token = await getPipsMinerSessionToken();
+    final accountId = await getPipsMinerAccountId();
 
     return token != null &&
         token.trim().isNotEmpty &&
         accountId != null &&
         accountId.trim().isNotEmpty;
+  }
+
+  Future<void> clearPipsMinerSession() async {
+    await _storage.delete(key: _pipsMinerSessionTokenKey);
+    await _storage.delete(key: _pipsMinerAccountIdKey);
   }
 
   Future<void> saveTradingSymbol(String symbol) async {
@@ -77,12 +78,6 @@ class SecureStorageService {
   Future<void> clearMt5Connection() async {
     await _storage.delete(key: _mt5LoginKey);
     await _storage.delete(key: _mt5ServerKey);
-  }
-
-  Future<void> clearMetaApiCredentials() async {
-    await _storage.delete(key: _metaApiTokenKey);
-    await _storage.delete(key: _metaApiAccountIdKey);
-    await _storage.delete(key: _metaApiRegionKey);
   }
 
   Future<void> clearAll() async {

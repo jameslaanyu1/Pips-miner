@@ -487,6 +487,45 @@ class MockTrading:
 
             return results
 
+    def calculate_margin(self, account_id, symbol, volume, buy, open_price):
+        """Calculate deterministic MT5-style margin for mock testing."""
+        account = self.account(account_id)
+
+        volume = float(volume)
+        open_price = float(open_price)
+
+        if volume <= 0:
+            raise ValueError("Margin volume must be greater than zero.")
+
+        if open_price <= 0:
+            raise ValueError("Margin open price must be greater than zero.")
+
+        leverage = 100.0
+        contract_size = float(self.contract_size(symbol))
+
+        margin = (
+            volume
+            * contract_size
+            * open_price
+            / leverage
+        )
+
+        free_margin = float(
+            self.information(account_id)["freeMargin"]
+        )
+
+        return {
+            "symbol": str(symbol).upper(),
+            "volume": volume,
+            "openPrice": open_price,
+            "buy": bool(buy),
+            "leverage": leverage,
+            "contractSize": contract_size,
+            "margin": round(margin, 2),
+            "freeMargin": round(free_margin, 2),
+            "currency": "USD",
+        }
+
     def specification(self, symbol):
         symbol = symbol.upper()
         return {

@@ -53,113 +53,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  Future<void> _setupMetaApi() async {
-    final tokenController = TextEditingController();
-    final accountIdController = TextEditingController();
-
-    final existingToken = await _storage.getMetaApiToken();
-    final existingAccountId = await _storage.getMetaApiAccountId();
-
-    if (existingToken != null) {
-      tokenController.text = existingToken;
-    }
-
-    if (existingAccountId != null) {
-      accountIdController.text = existingAccountId;
-    }
-
-    if (!mounted) {
-      tokenController.dispose();
-      accountIdController.dispose();
-      return;
-    }
-
-    final saved = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('MetaApi Setup'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Enter the MetaApi credentials assigned to this app. '
-                  'They are stored securely on this device.',
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: tokenController,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'MetaApi API Token',
-                    prefixIcon: Icon(Icons.key_rounded),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: accountIdController,
-                  decoration: const InputDecoration(
-                    labelText: 'MetaApi Account ID',
-                    prefixIcon: Icon(Icons.account_circle_rounded),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('CANCEL'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final token = tokenController.text.trim();
-                final accountId = accountIdController.text.trim();
-
-                if (token.isEmpty || accountId.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Enter both the MetaApi API token and account ID.',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-
-                await _storage.saveMetaApiCredentials(
-                  token: token,
-                  accountId: accountId,
-                );
-
-                if (dialogContext.mounted) {
-                  Navigator.pop(dialogContext, true);
-                }
-              },
-              child: const Text('SAVE'),
-            ),
-          ],
-        );
-      },
-    );
-
-    tokenController.dispose();
-    accountIdController.dispose();
-
-    if (saved == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'MetaApi credentials stored securely on this device.',
-          ),
-          backgroundColor: AppTheme.successColor,
-        ),
-      );
-    }
-  }
-
   Future<void> _connect(BotProvider bot) async {
     final login = _loginController.text.trim();
     final password = _passwordController.text;
@@ -215,7 +108,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _ConnectionSection(
                       bot: bot,
                       storage: _storage,
-                      onSetupMetaApi: _setupMetaApi,
                       onConnect: _connect,
                       loginController: _loginController,
                       serverController: _serverController,
@@ -313,7 +205,6 @@ class _SettingsHeader extends StatelessWidget {
 class _ConnectionSection extends StatelessWidget {
   final BotProvider bot;
   final SecureStorageService storage;
-  final VoidCallback onSetupMetaApi;
   final Future<void> Function(BotProvider) onConnect;
   final TextEditingController loginController;
   final TextEditingController serverController;
@@ -322,7 +213,6 @@ class _ConnectionSection extends StatelessWidget {
   const _ConnectionSection({
     required this.bot,
     required this.storage,
-    required this.onSetupMetaApi,
     required this.onConnect,
     required this.loginController,
     required this.serverController,
@@ -343,7 +233,7 @@ class _ConnectionSection extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             const Text(
-              'Connect your trading account through the configured MetaApi deployment.',
+              'Connect your MT5 account through the Pips-Miner trading backend.',
               style: TextStyle(
                 color: Colors.white38,
                 fontSize: 10.5,
@@ -371,66 +261,7 @@ class _ConnectionSection extends StatelessWidget {
               obscureText: true,
             ),
             const SizedBox(height: 14),
-            FutureBuilder<bool>(
-              future: storage.hasMetaApiCredentials(),
-              builder: (context, snapshot) {
-                final configured = snapshot.data == true;
-
-                return Container(
-                  padding: const EdgeInsets.all(13),
-                  decoration: BoxDecoration(
-                    color: (configured
-                            ? AppTheme.successColor
-                            : AppTheme.warningColor)
-                        .withOpacity(.07),
-                    borderRadius: BorderRadius.circular(13),
-                    border: Border.all(
-                      color: (configured
-                              ? AppTheme.successColor
-                              : AppTheme.warningColor)
-                          .withOpacity(.18),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        configured
-                            ? Icons.verified_rounded
-                            : Icons.warning_amber_rounded,
-                        size: 19,
-                        color: configured
-                            ? AppTheme.successColor
-                            : AppTheme.warningColor,
-                      ),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Text(
-                          configured
-                              ? 'MetaApi credentials configured'
-                              : 'MetaApi credentials required',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: configured
-                                ? AppTheme.successColor
-                                : AppTheme.warningColor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
             const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: bot.isBotRunning ? null : onSetupMetaApi,
-                icon: const Icon(Icons.key_rounded),
-                label: const Text('METAAPI CREDENTIALS'),
-              ),
-            ),
             const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
@@ -453,7 +284,7 @@ class _ConnectionSection extends StatelessWidget {
               const SizedBox(height: 12),
               _ConnectionStatus(
                 connected: true,
-                message: 'MT5 CONNECTED • METAAPI READY',
+                message: 'MT5 CONNECTED • PIPS-MINER READY',
               ),
             ],
             if (bot.connectionError != null) ...[
@@ -737,7 +568,7 @@ class _EngineSection extends StatelessWidget {
                   : Colors.white38,
             ),
             _StatusLine(
-              title: 'MetaApi connection',
+              title: 'Pips-Miner trading connection',
               value: bot.isConnected ? 'READY' : 'NOT CONNECTED',
               color: bot.isConnected
                   ? AppTheme.successColor

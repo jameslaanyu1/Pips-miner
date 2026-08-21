@@ -3,3 +3,9 @@ __pycache__/
 
 .reversal_manager_state.json
 app-release.apk
+.vercel
+.env*
+
+# Local runtime database
+data/
+.pipsminer-env

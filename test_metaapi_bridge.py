@@ -7,7 +7,15 @@ Gold (XAUUSD) Trading Symbol
 import asyncio
 import logging
 from datetime import datetime
-from metaapi_bridge import MetaAPIBridge, OrderType
+try:
+    from metaapi_bridge import MetaAPIBridge, OrderType
+except ModuleNotFoundError as exc:
+    if exc.name == "metaapi_cloud_sdk":
+        import unittest
+        raise unittest.SkipTest(
+            "Legacy MetaApi bridge test skipped: metaapi_cloud_sdk is not installed."
+        )
+    raise
 import os
 from dotenv import load_dotenv
 

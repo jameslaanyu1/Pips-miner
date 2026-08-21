@@ -407,6 +407,26 @@ def mock_request(account_id, method, path, body=None):
     if method == "POST" and path == "/trade":
         return MOCK_TRADING.trade(account_id, body or {})
 
+    if method == "POST" and path == "/calculate-margin":
+        data = body or {}
+
+        symbol = str(data.get("symbol", "EURUSD")).upper()
+        volume = float(data.get("volume", 0.01))
+        buy = bool(data.get("buy", True))
+        open_price = float(data.get("openPrice", 0))
+
+        if open_price <= 0:
+            bid, ask = MOCK_TRADING.price(symbol)
+            open_price = ask if buy else bid
+
+        return MOCK_TRADING.calculate_margin(
+            account_id=account_id,
+            symbol=symbol,
+            volume=volume,
+            buy=buy,
+            open_price=open_price,
+        )
+
     parts = [x for x in path.split("/") if x]
 
     if (

@@ -1,43 +1,31 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
 class MetaApiService {
   MetaApiService({
     required this.token,
     required this.accountId,
-    this.region = 'new-york',
   });
 
+  /// This is the Pips-Miner session token returned by /api/v1/connect.
+  /// It is NOT the MetaApi master token.
   final String token;
+
+  /// Kept for compatibility with the existing BotProvider/engine API.
+  /// The backend obtains the account ID from the authenticated session.
   final String accountId;
-  final String region;
 
-  static const String _provisioningBase =
-      'https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai';
-
-  String get _clientBase =>
-      'https://mt-client-api-v1.$region.agiliumtrade.ai';
+  static const String _base =
+      'https://pips-miner-backend.vercel.app';
 
   Map<String, String> get _headers => {
-        'auth-token': token,
+        'Authorization': 'Bearer ${token.trim()}',
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       };
 
-  Uri _provisioning(String path) =>
-      Uri.parse('$_provisioningBase$path');
-
-  Uri _client(String path) =>
-      Uri.parse('$_clientBase/users/current/accounts/$accountId$path');
-
-  Future<Map<String, dynamic>> account() async {
-    final response = await http.get(
-      _provisioning('/users/current/accounts/$accountId'),
-      headers: _headers,
-    );
-
-    return _map(response);
-  }
+  Uri _uri(String path) => Uri.parse('$_base$path');
 
   Future<Map<String, dynamic>> waitUntilReady({
     Duration timeout = const Duration(seconds: 60),
@@ -48,40 +36,8 @@ class MetaApiService {
 
     while (DateTime.now().isBefore(deadline)) {
       try {
-        final status = await account();
-        final state = status['state']?.toString().toUpperCase();
-
-        if (state == 'UNDEPLOYED') {
-          throw Exception(
-            'MetaApi account is not deployed. Deploy the MT5 account first.',
-          );
-        }
-
-        if (state == 'DEPLOY_FAILED' ||
-            state == 'UNDEPLOY_FAILED' ||
-            state == 'REDEPLOY_FAILED') {
-          throw Exception(
-            'MetaApi account deployment failed (state: $state).',
-          );
-        }
-
-        if (state == 'DEPLOYED') {
-          try {
-            // The client API is the authoritative readiness check.
-            return await accountInformation();
-          } catch (e) {
-            lastError = e;
-          }
-        } else {
-          lastError = Exception(
-            'MetaApi account is still starting (state: ${state ?? 'UNKNOWN'}).',
-          );
-        }
+        return await accountInformation();
       } catch (e) {
-        if (e.toString().contains('is not deployed') ||
-            e.toString().contains('deployment failed')) {
-          rethrow;
-        }
         lastError = e;
       }
 
@@ -89,59 +45,15 @@ class MetaApiService {
     }
 
     throw Exception(
-      'MetaApi account did not become ready within '
+      'Pips-Miner trading session did not become ready within '
       '${timeout.inSeconds} seconds.'
       '${lastError == null ? '' : ' Last error: $lastError'}',
     );
   }
 
-  Future<List<dynamic>> accounts() async {
-    final response = await http.get(
-      _provisioning('/users/current/accounts'),
-      headers: _headers,
-    );
-
-    return _list(response);
-  }
-
-  Future<Map<String, dynamic>> configureCredentials({
-    required String login,
-    required String password,
-  }) async {
-    final response = await http.put(
-      _provisioning(
-        '/users/current/accounts/$accountId/credentials',
-      ),
-      headers: _headers,
-      body: jsonEncode({
-        'login': login.trim(),
-        'password': password,
-      }),
-    );
-
-    return _map(response);
-  }
-
-  Future<void> deploy() async {
-    final response = await http.post(
-      _provisioning(
-        '/users/current/accounts/$accountId/deploy',
-      ),
-      headers: _headers,
-    );
-
-    if (response.statusCode != 204 &&
-        response.statusCode < 200 ||
-        response.statusCode >= 300) {
-      throw Exception(
-        'MetaApi deployment failed: ${response.body}',
-      );
-    }
-  }
-
   Future<Map<String, dynamic>> accountInformation() async {
     final response = await http.get(
-      _client('/account-information'),
+      _uri('/api/v1/account-information'),
       headers: _headers,
     );
 
@@ -150,7 +62,7 @@ class MetaApiService {
 
   Future<List<dynamic>> positions() async {
     final response = await http.get(
-      _client('/positions'),
+      _uri('/api/v1/positions'),
       headers: _headers,
     );
 
@@ -159,7 +71,7 @@ class MetaApiService {
 
   Future<List<dynamic>> orders() async {
     final response = await http.get(
-      _client('/orders'),
+      _uri('/api/v1/orders'),
       headers: _headers,
     );
 
@@ -168,8 +80,9 @@ class MetaApiService {
 
   Future<Map<String, dynamic>> symbolPrice(String symbol) async {
     final response = await http.get(
-      _client(
-        '/symbols/${Uri.encodeComponent(symbol)}/current-price',
+      _uri(
+        '/api/v1/symbols/'
+        '${Uri.encodeComponent(symbol)}/current-price',
       ),
       headers: _headers,
     );
@@ -181,8 +94,9 @@ class MetaApiService {
     String symbol,
   ) async {
     final response = await http.get(
-      _client(
-        '/symbols/${Uri.encodeComponent(symbol)}/specification',
+      _uri(
+        '/api/v1/symbols/'
+        '${Uri.encodeComponent(symbol)}/specification',
       ),
       headers: _headers,
     );
@@ -195,28 +109,26 @@ class MetaApiService {
     String timeframe = '1m',
     int limit = 100,
   }) async {
-    // MetaApi current-candles returns ONE candle.
-    // The velocity engine needs a rolling M1 history for its
-    // 14-candle velocity and volume baselines.
-    final marketDataBase =
-        'https://mt-market-data-client-api-v1.$region.agiliumtrade.ai';
-
-    final uri = Uri.parse(
-      '$marketDataBase/users/current/accounts/$accountId'
-      '/historical-market-data/symbols/${Uri.encodeComponent(symbol)}'
-      '/timeframes/$timeframe/candles',
-    ).replace(
-      queryParameters: {
-        'limit': limit.toString(),
-      },
-    );
-
+    // The Pips-Miner backend currently returns the mock/history
+    // data through the same current-candles endpoint.
+    //
+    // Keep limit for compatibility with the velocity engine.
     final response = await http.get(
-      uri,
+      _uri(
+        '/api/v1/symbols/'
+        '${Uri.encodeComponent(symbol)}/current-candles/'
+        '${Uri.encodeComponent(timeframe)}',
+      ),
       headers: _headers,
     );
 
-    return _list(response);
+    final candles = _list(response);
+
+    if (candles.length <= limit) {
+      return candles;
+    }
+
+    return candles.sublist(candles.length - limit);
   }
 
   Future<Map<String, dynamic>> marketOrder({
@@ -293,7 +205,7 @@ class MetaApiService {
     required double openPrice,
   }) async {
     final response = await http.post(
-      _client('/calculate-margin'),
+      _uri('/api/v1/calculate-margin'),
       headers: _headers,
       body: jsonEncode({
         'symbol': symbol,
@@ -312,7 +224,7 @@ class MetaApiService {
     Map<String, dynamic> body,
   ) async {
     final response = await http.post(
-      _client('/trade'),
+      _uri('/api/v1/trade'),
       headers: _headers,
       body: jsonEncode(body),
     );
@@ -323,6 +235,10 @@ class MetaApiService {
   Map<String, dynamic> _map(http.Response response) {
     _check(response);
 
+    if (response.body.trim().isEmpty) {
+      return <String, dynamic>{};
+    }
+
     final decoded = jsonDecode(response.body);
 
     if (decoded is Map<String, dynamic>) {
@@ -330,12 +246,16 @@ class MetaApiService {
     }
 
     throw Exception(
-      'Unexpected MetaApi response',
+      'Unexpected Pips-Miner response.',
     );
   }
 
   List<dynamic> _list(http.Response response) {
     _check(response);
+
+    if (response.body.trim().isEmpty) {
+      return <dynamic>[];
+    }
 
     final decoded = jsonDecode(response.body);
 
@@ -343,25 +263,35 @@ class MetaApiService {
       return decoded;
     }
 
-    // MetaApi provisioning may return a paginated object:
-    // {"count": ..., "items": [...]}
     if (decoded is Map<String, dynamic>) {
       final items = decoded['items'];
+
       if (items is List) {
         return items;
       }
     }
 
     throw Exception(
-      'Unexpected MetaApi list response',
+      'Unexpected Pips-Miner list response.',
     );
   }
 
   void _check(http.Response response) {
     if (response.statusCode < 200 ||
         response.statusCode >= 300) {
+      String message = response.body;
+
+      try {
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map<String, dynamic> &&
+            decoded['error'] != null) {
+          message = decoded['error'].toString();
+        }
+      } catch (_) {}
+
       throw Exception(
-        'MetaApi HTTP ${response.statusCode}: ${response.body}',
+        'Pips-Miner HTTP ${response.statusCode}: $message',
       );
     }
   }
