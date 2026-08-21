@@ -238,7 +238,22 @@ def wait_for_account_connection(account_id):
 
         time.sleep(3)
 
-    return last_status or {}
+    if last_status:
+        state = str(last_status.get("state", "")).upper()
+        connection = str(
+            last_status.get("connectionStatus", "")
+        ).upper()
+
+        raise RuntimeError(
+            "MetaApi account did not become connected within "
+            f"{CONNECT_LIMIT_SECONDS} seconds "
+            f"(state={state or 'UNKNOWN'}, "
+            f"connectionStatus={connection or 'UNKNOWN'})."
+        )
+
+    raise RuntimeError(
+        "MetaApi did not return an account connection status."
+    )
 
 @app.get("/health")
 def health():
@@ -346,8 +361,40 @@ def connect_account():
             platform=platform,
         )
 
-        deploy_metaapi_account(account_id)
-        status = wait_for_account_connection(account_id)
+        # Reuse an account that is already deployed and connected.
+        # This is important because deployment may require an active
+        # MetaApi subscription, while an already-running account can
+        # continue to be used without another deployment request.
+        current_status = provisioning_account(account_id)
+        current_state = str(
+            current_status.get("state", "")
+        ).upper()
+        current_connection = str(
+            current_status.get("connectionStatus", "")
+        ).upper()
+
+        already_connected = (
+            current_state == "DEPLOYED"
+            and current_connection in ("CONNECTED", "SYNCHRONIZED")
+        )
+
+        if already_connected:
+            # Verify the client API is actually usable before creating
+            # a mobile session from provisioning status alone.
+            response = meta_raw(
+                "GET",
+                METAAPI_CLIENT_URL,
+                f"/users/current/accounts/{account_id}/account-information",
+            )
+
+            if 200 <= response.status_code < 300:
+                status = current_status
+            else:
+                deploy_metaapi_account(account_id)
+                status = wait_for_account_connection(account_id)
+        else:
+            deploy_metaapi_account(account_id)
+            status = wait_for_account_connection(account_id)
 
         session_token = create_session(
             account_id=account_id,
