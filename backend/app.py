@@ -116,7 +116,7 @@ def response_body(response):
         return response.text
 
 def list_metaapi_accounts(login):
-    query = urlencode({"query": login, "limit": 100})
+    query = urlencode({"limit": 100})
     response = meta_raw(
         "GET",
         METAAPI_PROVISIONING_URL,
