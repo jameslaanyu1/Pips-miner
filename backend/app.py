@@ -11,6 +11,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from backend.user_auth import create_session, get_session
+from backend.mock_trading import MOCK_TRADING
 
 app = Flask(__name__)
 
@@ -37,6 +38,9 @@ DATABASE = os.environ.get(
 )
 MAGIC = int(os.environ.get("PIPSMINER_MAGIC", "26081501"))
 CONNECT_LIMIT_SECONDS = int(os.environ.get("CONNECT_LIMIT_SECONDS", "60"))
+MOCK_TRADING_ENABLED = os.environ.get("MOCK_TRADING", "").strip().lower() in (
+    "1", "true", "yes", "on"
+)
 
 os.makedirs(os.path.dirname(DATABASE), exist_ok=True)
 
@@ -246,6 +250,13 @@ def health():
 
 @app.get("/ready")
 def ready():
+    if MOCK_TRADING_ENABLED:
+        return jsonify({
+            "ok": True,
+            "mode": "mock",
+            "metaapi": "bypassed"
+        })
+
     if not METAAPI_TOKEN:
         return error("METAAPI_TOKEN is not configured.", 503)
     try:
@@ -300,6 +311,34 @@ def connect_account():
         return error("Credential fields are too long.")
 
     try:
+        if MOCK_TRADING_ENABLED:
+            account_id = MOCK_TRADING.connect(
+                login,
+                server,
+                platform,
+            )
+
+            session_token = create_session(
+                account_id=account_id,
+                mode="mock",
+                login=login,
+                server=server,
+            )
+
+            return jsonify({
+                "ok": True,
+                "sessionToken": session_token,
+                "accountId": account_id,
+                "login": login,
+                "server": server,
+                "platform": platform,
+                "state": "DEPLOYED",
+                "connectionStatus": "SYNCHRONIZED",
+                "connected": True,
+                "action": "mock",
+                "mode": "mock",
+            })
+
         account_id, action = create_metaapi_account(
             login=login,
             password=password,
@@ -355,7 +394,67 @@ def disconnect_account(session):
     # The MT account remains in MetaApi; this only ends the mobile session.
     return jsonify({"ok": True})
 
+def mock_request(account_id, method, path, body=None):
+    if method == "GET" and path == "/account-information":
+        return MOCK_TRADING.information(account_id)
+
+    if method == "GET" and path == "/positions":
+        return MOCK_TRADING.positions(account_id)
+
+    if method == "GET" and path == "/orders":
+        return MOCK_TRADING.orders(account_id)
+
+    if method == "POST" and path == "/trade":
+        return MOCK_TRADING.trade(account_id, body or {})
+
+    parts = [x for x in path.split("/") if x]
+
+    if (
+        method == "GET"
+        and len(parts) == 3
+        and parts[0] == "symbols"
+        and parts[2] == "current-price"
+    ):
+        return {
+            "symbol": parts[1].upper(),
+            "bid": MOCK_TRADING.price(parts[1])[0],
+            "ask": MOCK_TRADING.price(parts[1])[1],
+            "time": int(time.time() * 1000),
+        }
+
+    if (
+        method == "GET"
+        and len(parts) == 3
+        and parts[0] == "symbols"
+        and parts[2] == "specification"
+    ):
+        return MOCK_TRADING.specification(parts[1])
+
+    if (
+        method == "GET"
+        and len(parts) == 4
+        and parts[0] == "symbols"
+        and parts[2] == "current-candles"
+    ):
+        return MOCK_TRADING.candles(parts[1], parts[3])
+
+    raise ValueError(f"Unsupported mock API route: {method} {path}")
+
+
 def meta_request(method, account_id, path, **kwargs):
+    if MOCK_TRADING_ENABLED:
+        try:
+            return jsonify(
+                mock_request(
+                    account_id,
+                    method,
+                    path,
+                    kwargs.get("json"),
+                )
+            )
+        except Exception as exc:
+            return error(str(exc), 400)
+
     try:
         response = meta_raw(
             method,
@@ -388,6 +487,55 @@ def account_information(session):
 @require_session
 def positions(session):
     return meta_request("GET", session["account_id"], "/positions")
+
+@app.post("/api/v1/mock/trigger")
+@require_session
+def mock_trigger(session):
+    if not MOCK_TRADING_ENABLED:
+        return error("Mock trading is not enabled.", 403)
+
+    body = request.get_json(silent=True) or {}
+    order_id = str(body.get("orderId", "")).strip()
+
+    if not order_id:
+        return error("orderId is required.")
+
+    account_id = session["account_id"]
+    account = MOCK_TRADING.account(account_id)
+
+    for order in account["orders"]:
+        if order["id"] == order_id:
+            symbol = order["symbol"]
+            bid, ask = MOCK_TRADING.price(symbol)
+
+            if order["type"] == "ORDER_TYPE_SELL_STOP":
+                MOCK_TRADING._trigger_price_override = {
+                    symbol: (float(order["openPrice"]) - 0.00001,
+                             float(order["openPrice"]) + 0.00009)
+                }
+            elif order["type"] == "ORDER_TYPE_BUY_STOP":
+                MOCK_TRADING._trigger_price_override = {
+                    symbol: (float(order["openPrice"]) + 0.00001,
+                             float(order["openPrice"]) + 0.00011)
+                }
+            else:
+                return error("Only BUY STOP and SELL STOP orders can be triggered.")
+
+            try:
+                result = MOCK_TRADING.process_pending_orders(account_id)
+            finally:
+                MOCK_TRADING._trigger_price_override = {}
+
+            return jsonify({
+                "ok": True,
+                "triggered": result,
+                "previousPrice": {
+                    "bid": bid,
+                    "ask": ask,
+                },
+            })
+
+    return error("Mock order not found.", 404)
 
 @app.get("/api/v1/orders")
 @require_session
