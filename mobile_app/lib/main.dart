@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'providers/bot_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/app_update_service.dart';
 import 'services/background_execution_service.dart';
 import 'theme/app_theme.dart';
 
@@ -46,6 +47,14 @@ class _MainScreenState extends State<MainScreen> {
     HomeScreen(),
     SettingsScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AppUpdateService.instance.promptIfUpdateAvailable(context);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
