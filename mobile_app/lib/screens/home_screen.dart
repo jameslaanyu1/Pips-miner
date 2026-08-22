@@ -54,16 +54,15 @@ class HomeScreen extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: AppTheme.accentColor.withOpacity(.12),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: AppTheme.accentColor.withOpacity(.28),
             ),
           ),
-          child: const Icon(
-            Icons.auto_graph_rounded,
-            color: AppTheme.accentColor,
-            size: 24,
+          clipBehavior: Clip.antiAlias,
+          child: Image.asset(
+            'assets/pips_miner_pro_icon.png',
+            fit: BoxFit.cover,
           ),
         ),
         const SizedBox(width: 12),

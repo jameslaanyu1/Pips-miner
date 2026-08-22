@@ -59,10 +59,12 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.4
 flutter:
   uses-material-design: true
+  assets:
+    - assets/pips_miner_pro_icon.png
 
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: assets/piplife_icon.png
+  image_path: assets/pips_miner_pro_icon.png
   adaptive_icon_background: "#000000"
-  adaptive_icon_foreground: assets/piplife_icon.png
+  adaptive_icon_foreground: assets/pips_miner_pro_icon.png

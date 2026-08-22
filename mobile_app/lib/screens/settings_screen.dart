@@ -152,16 +152,15 @@ class _SettingsHeader extends StatelessWidget {
             width: 45,
             height: 45,
             decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withOpacity(.12),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: AppTheme.primaryColor.withOpacity(.30),
               ),
             ),
-            child: const Icon(
-              Icons.tune_rounded,
-              color: AppTheme.primaryColor,
-              size: 25,
+            clipBehavior: Clip.antiAlias,
+            child: Image.asset(
+              'assets/pips_miner_pro_icon.png',
+              fit: BoxFit.cover,
             ),
           ),
           const SizedBox(width: 12),
