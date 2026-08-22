@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -42,6 +44,8 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  Timer? _updateTimer;
+  bool _updatePromptOpen = false;
 
   final List<Widget> _screens = const [
     HomeScreen(),
@@ -51,9 +55,27 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      AppUpdateService.instance.promptIfUpdateAvailable(context);
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+    _updateTimer = Timer.periodic(
+      const Duration(minutes: 10),
+      (_) => _checkForUpdate(),
+    );
+  }
+
+  Future<void> _checkForUpdate() async {
+    if (!mounted || _updatePromptOpen) return;
+    _updatePromptOpen = true;
+    try {
+      await AppUpdateService.instance.promptIfUpdateAvailable(context);
+    } finally {
+      _updatePromptOpen = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
   }
 
   @override
