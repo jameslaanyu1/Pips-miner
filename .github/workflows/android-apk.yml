@@ -183,6 +183,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
+        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
