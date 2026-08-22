@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/bot_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/app_update_service.dart';
 import 'services/background_execution_service.dart';
 import 'theme/app_theme.dart';
 
@@ -41,11 +44,39 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  Timer? _updateTimer;
+  bool _updatePromptOpen = false;
 
   final List<Widget> _screens = const [
     HomeScreen(),
     SettingsScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+    _updateTimer = Timer.periodic(
+      const Duration(minutes: 10),
+      (_) => _checkForUpdate(),
+    );
+  }
+
+  Future<void> _checkForUpdate() async {
+    if (!mounted || _updatePromptOpen) return;
+    _updatePromptOpen = true;
+    try {
+      await AppUpdateService.instance.promptIfUpdateAvailable(context);
+    } finally {
+      _updatePromptOpen = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
