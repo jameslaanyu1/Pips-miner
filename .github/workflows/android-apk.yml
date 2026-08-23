@@ -134,8 +134,8 @@ jobs:
           actual_package=$("$build_tools/aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
           echo "APK package: $actual_package"
           test "$actual_package" = "$expected_package"
-          expected_cert=$(keytool -list -v -keystore "$KEYSTORE" -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" 2>/dev/null | awk -F': ' '/SHA256:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
-          actual_cert=$("$build_tools/apksigner" verify --print-certs "$APK" 2>/dev/null | awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
+          expected_cert=$(keytool -list -v -keystore "$KEYSTORE" -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" 2>/dev/null | grep -m1 'SHA256:' | grep -oE '[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){31}' | tr -d ':' | tr '[:lower:]' '[:upper:]')
+          actual_cert=$("$build_tools/apksigner" verify --print-certs "$APK" 2>/dev/null | grep -m1 'certificate SHA-256 digest:' | grep -oE '[0-9A-Fa-f]{64}' | tr '[:lower:]' '[:upper:]')
           echo "Release certificate: $expected_cert"; echo "APK certificate: $actual_cert"
           test -n "$expected_cert"; test -n "$actual_cert"; test "$expected_cert" = "$actual_cert"
           echo 'PASS: package identity and release certificate match.'
