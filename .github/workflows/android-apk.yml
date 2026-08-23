@@ -65,6 +65,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           gradle = Path("android/app/build.gradle.kts")
           if not gradle.exists():
@@ -72,30 +73,34 @@ jobs:
 
           text = gradle.read_text()
 
-          if "compileSdk = 36" not in text:
-              text = text.replace(
-                  "compileSdk = flutter.compileSdkVersion",
-                  "compileSdk = 36",
-                  1,
-              )
+          # Pin the compile SDK used by the release build.
+          text = text.replace(
+              "compileSdk = flutter.compileSdkVersion",
+              "compileSdk = 36",
+              1,
+          )
 
+          # Enable Java 17/core-library desugaring in the Android app module.
           if "isCoreLibraryDesugaringEnabled = true" not in text:
+              if "compileOptions {" not in text:
+                  raise SystemExit("ERROR: compileOptions block not found in Android Gradle file")
               text = text.replace(
                   "compileOptions {",
-                  """compileOptions {
-                  isCoreLibraryDesugaringEnabled = true
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17""",
+                  "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
                   1,
               )
 
-          dependency = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")'
-          if dependency not in text:
-              text = text.replace(
-                  "dependencies {",
-                  "dependencies {\n    " + dependency,
-                  1,
-              )
+          # Remove any previous coreLibraryDesugaring dependency line, then
+          # append a dedicated dependencies block. Multiple Gradle dependency
+          # blocks are valid and this avoids accidentally inserting the
+          # dependency into an unrelated generated block.
+          text = re.sub(
+              r"^\s*coreLibraryDesugaring\(.*\)\s*$",
+              "",
+              text,
+              flags=re.MULTILINE,
+          )
+          text = text.rstrip() + "\n\ndependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n}\n"
 
           gradle.write_text(text)
           PY
@@ -166,8 +171,6 @@ jobs:
         run: dart run flutter_launcher_icons
 
       - name: Analyze Flutter project
-        # Warnings/infos should not block a production APK. Actual analyzer
-        # errors remain fatal and stop the release before publishing.
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Build release APK
