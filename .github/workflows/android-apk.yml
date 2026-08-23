@@ -212,11 +212,11 @@ class MainActivity : FlutterActivity() {{
           path: Pips-Miner-release.apk
           if-no-files-found: error
       - name: Publish GitHub release
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="1.0.${GITHUB_RUN_NUMBER}"
-          RELEASE_TAG="v${VERSION}"
-          RELEASE_TITLE="Pips Miner v${VERSION}"
-          gh release create "${RELEASE_TAG}" Pips-Miner-release.apk --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "${RELEASE_TITLE}" --generate-notes --latest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Pips Miner v1.0.${{ github.run_number }}
+          generate_release_notes: true
+          make_latest: true
+          files: Pips-Miner-release.apk
+          token: ${{ secrets.PIPS_MINER_RELEASE_TOKEN }}
