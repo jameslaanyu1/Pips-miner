@@ -56,7 +56,6 @@ jobs:
           PIPS_MINER_KEY_PASSWORD: ${{ secrets.PIPS_MINER_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          PACKAGE_ID='com.example.pips_miner'
           for value in PIPS_MINER_KEYSTORE_BASE64 PIPS_MINER_KEY_ALIAS PIPS_MINER_KEYSTORE_PASSWORD PIPS_MINER_KEY_PASSWORD; do
             [ -n "${!value}" ] || { echo "ERROR: Missing signing secret: $value"; exit 1; }
           done
@@ -127,10 +126,11 @@ jobs:
           PIPS_MINER_KEYSTORE_PASSWORD: ${{ secrets.PIPS_MINER_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
-          APK='mobile_app/build/app/outputs/flutter-apk/app-release.apk'
-          KEYSTORE='mobile_app/android/app/Pips-Miner-release.jks'
+          APK='build/app/outputs/flutter-apk/app-release.apk'
+          KEYSTORE='android/app/Pips-Miner-release.jks'
           expected_package='com.example.pips_miner'
           build_tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          test -f "$APK" || { echo "ERROR: APK not found: $APK"; exit 1; }
           actual_package=$("$build_tools/aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
           echo "APK package: $actual_package"
           test "$actual_package" = "$expected_package"
