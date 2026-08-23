@@ -37,7 +37,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Stamp unique release version
+      - name: Stamp release version
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -46,12 +46,10 @@ jobs:
 
           path = Path("pubspec.yaml")
           text = path.read_text()
-          # Keep the public version patch based on the sequential run number,
-          # while using the globally unique run ID as the Android build number.
-          # This keeps Flutter's versionCode strictly numeric and avoids release-tag collisions.
-          run_number = os.environ["GITHUB_RUN_NUMBER"]
           run_id = os.environ["GITHUB_RUN_ID"]
-          version = f"1.0.{run_number}+{run_id}"
+          # Keep Flutter's version/build metadata strictly numeric for Android.
+          # The Android Gradle script is also patched below to use run_id directly.
+          version = f"1.0.{os.environ['GITHUB_RUN_NUMBER']}+{run_id}"
           text, count = re.subn(
               r"^version:\s*[^\n]+$",
               f"version: {version}",
@@ -63,7 +61,6 @@ jobs:
               raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
           print(f"Pips Miner release version: {version}")
-          print(f"Android build number: {run_id}")
           PY
 
       - name: Generate Android platform
@@ -80,6 +77,22 @@ jobs:
               raise SystemExit("ERROR: Android app Gradle file not found")
 
           text = gradle.read_text()
+
+          # Flutter 3.35's generated Kotlin Gradle file can expose the pubspec
+          # build number as a String. Android's versionCode must be an Int.
+          # Use the numeric GitHub run ID explicitly so this can never fail the
+          # release build because of Flutter/Gradle type conversion.
+          text = re.sub(
+              r"(?m)^\s*val flutterVersionCode\s*=\s*flutter\.versionCode\s*$",
+              'val flutterVersionCode: Int = System.getenv("GITHUB_RUN_ID")?.toIntOrNull() ?: 1',
+              text,
+          )
+          text = re.sub(
+              r"(?m)^\s*val flutterVersionName\s*=\s*flutter\.versionName\s*$",
+              'val flutterVersionName: String = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "1"}"',
+              text,
+          )
+
           text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
 
           if "isCoreLibraryDesugaringEnabled = true" not in text:
@@ -182,8 +195,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # GITHUB_RUN_ID is unique across workflow runs, so this tag cannot
-          # collide with another run, including workflow retries.
           RELEASE_TAG="v1.0.${GITHUB_RUN_ID}"
           RELEASE_TITLE="Pips Miner v1.0.${GITHUB_RUN_ID}"
 
