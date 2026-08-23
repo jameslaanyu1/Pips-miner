@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -149,6 +150,7 @@ class AppUpdateService {
     if (await tempFile.exists()) await tempFile.delete();
     if (await apkFile.exists()) await apkFile.delete();
 
+    _downloadProgressNotifier.value = const DownloadProgress(received: 0, total: -1);
     final downloadFuture = _dio.download(
       update.downloadUrl,
       tempPath,
@@ -166,7 +168,6 @@ class AppUpdateService {
       },
     );
 
-    _downloadProgressNotifier.value = const DownloadProgress(received: 0, total: -1);
     await _showDownloadProgress(context, update, downloadFuture);
     await downloadFuture;
 
@@ -190,16 +191,14 @@ class AppUpdateService {
   final ValueNotifier<DownloadProgress> _downloadProgressNotifier = ValueNotifier(const DownloadProgress(received: 0, total: -1));
 
   Future<void> _showDownloadProgress(BuildContext context, AppUpdateInfo update, Future<Response> downloadFuture) async {
-    final completer = Future<void>.delayed(const Duration(days: 1));
-    downloadFuture.whenComplete(() {}).then((_) {});
+    final dialogReady = Completer<void>();
+    var dialogOpen = true;
 
-    await showDialog<void>(
+    final dialogFuture = showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        downloadFuture.whenComplete(() {
-          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-        });
+        if (!dialogReady.isCompleted) dialogReady.complete();
         return PopScope(
           canPop: false,
           child: AlertDialog(
@@ -231,7 +230,19 @@ class AppUpdateService {
       },
     );
 
-    await completer;
+    await dialogReady.future;
+    downloadFuture.whenComplete(() {
+      if (dialogOpen && context.mounted) {
+        dialogOpen = false;
+        Navigator.of(context).pop();
+      }
+    });
+
+    try {
+      await Future.wait<void>([downloadFuture.then<void>((_) {}), dialogFuture]);
+    } finally {
+      dialogOpen = false;
+    }
   }
 
   static String _formatBytes(int bytes) {
