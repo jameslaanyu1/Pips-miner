@@ -23,8 +23,8 @@ class AppUpdateService {
 
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const _latestReleaseUrl =
-      'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest';
+  static const _releasesUrl =
+      'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases?per_page=20';
 
   final Dio _dio = Dio(
     BaseOptions(
@@ -42,44 +42,75 @@ class AppUpdateService {
   Future<AppUpdateInfo?> checkForUpdate() async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
-      final response = await _dio.get<Map<String, dynamic>>(_latestReleaseUrl);
-      final data = response.data;
-      if (data == null) return null;
+      final response = await _dio.get<List<dynamic>>(_releasesUrl);
+      final releases = response.data;
+      if (releases == null) return null;
 
-      // Release tags are deliberately unique CI identifiers and are NOT the
-      // application version. The release title carries the actual app version.
-      final releaseName = data['name']?.toString() ?? '';
-      final versionMatch = RegExp(r'Pips Miner v(\d+(?:\.\d+)+)').firstMatch(releaseName);
-      final remoteVersion = versionMatch?.group(1) ?? '';
-      final releaseUrl = data['html_url']?.toString() ?? '';
+      AppUpdateInfo? newestUpdate;
 
-      final assets = data['assets'];
-      if (assets is! List || remoteVersion.isEmpty) return null;
+      for (final release in releases) {
+        if (release is! Map<String, dynamic>) continue;
+        if (release['draft'] == true || release['prerelease'] == true) continue;
 
-      String? apkUrl;
-      for (final asset in assets) {
-        if (asset is Map<String, dynamic> &&
-            asset['name']?.toString() == 'Pips-Miner-release.apk') {
-          apkUrl = asset['browser_download_url']?.toString();
-          break;
+        // The workflow keeps the app version in the release title. The tag is
+        // only a unique CI identifier, but is accepted as a fallback so older
+        // releases remain compatible with the updater.
+        final releaseName = release['name']?.toString() ?? '';
+        final releaseTag = release['tag_name']?.toString() ?? '';
+        final remoteVersion = _extractVersion(releaseName, releaseTag);
+        if (remoteVersion == null) continue;
+
+        final assets = release['assets'];
+        if (assets is! List) continue;
+
+        String? apkUrl;
+        for (final asset in assets) {
+          if (asset is Map<String, dynamic> &&
+              asset['name']?.toString() == 'Pips-Miner-release.apk') {
+            apkUrl = asset['browser_download_url']?.toString();
+            break;
+          }
+        }
+        if (apkUrl == null || apkUrl.isEmpty) continue;
+
+        final releaseUrl = release['html_url']?.toString() ?? '';
+        final candidate = AppUpdateInfo(
+          version: remoteVersion,
+          downloadUrl: apkUrl,
+          releaseUrl: releaseUrl,
+        );
+
+        if (_compareVersions(candidate.version, packageInfo.version) <= 0) {
+          continue;
+        }
+
+        if (newestUpdate == null ||
+            _compareVersions(candidate.version, newestUpdate.version) > 0) {
+          newestUpdate = candidate;
         }
       }
 
-      if (apkUrl == null || apkUrl.isEmpty) return null;
-
-      if (_compareVersions(remoteVersion, packageInfo.version) <= 0) {
-        return null;
-      }
-
-      return AppUpdateInfo(
-        version: remoteVersion,
-        downloadUrl: apkUrl,
-        releaseUrl: releaseUrl,
-      );
+      return newestUpdate;
     } catch (_) {
       // Update checks must never prevent Pips Miner from starting.
       return null;
     }
+  }
+
+  String? _extractVersion(String releaseName, String releaseTag) {
+    final patterns = <RegExp>[
+      RegExp(r'Pips Miner v(\d+(?:\.\d+)+)', caseSensitive: false),
+      RegExp(r'^v?(\d+(?:\.\d+)+)$', caseSensitive: false),
+      RegExp(r'v(\d+(?:\.\d+)+)', caseSensitive: false),
+    ];
+
+    for (final pattern in patterns) {
+      final nameMatch = pattern.firstMatch(releaseName);
+      if (nameMatch != null) return nameMatch.group(1);
+      final tagMatch = pattern.firstMatch(releaseTag);
+      if (tagMatch != null) return tagMatch.group(1);
+    }
+    return null;
   }
 
   Future<void> promptIfUpdateAvailable(BuildContext context) async {
