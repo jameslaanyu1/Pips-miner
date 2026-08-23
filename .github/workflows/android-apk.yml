@@ -40,14 +40,9 @@ jobs:
           path = Path('pubspec.yaml')
           text = path.read_text()
           run_number = os.environ['GITHUB_RUN_NUMBER']
-          text, count = re.subn(
-              r'^version:\s*[^\n]+$',
-              f'version: 1.0.{run_number}+{run_number}',
-              text, count=1, flags=re.MULTILINE)
-          if count != 1:
-              raise SystemExit('ERROR: pubspec.yaml version field not found')
+          text, count = re.subn(r'^version:\s*[^\n]+$', f'version: 1.0.{run_number}+{run_number}', text, count=1, flags=re.MULTILINE)
+          if count != 1: raise SystemExit('ERROR: pubspec.yaml version field not found')
           path.write_text(text)
-          print(f'Release version: 1.0.{run_number}')
           PY
 
       - name: Generate Android platform
@@ -62,62 +57,43 @@ jobs:
         run: |
           set -euo pipefail
           PACKAGE_ID='com.example.pips_miner'
-
           for value in PIPS_MINER_KEYSTORE_BASE64 PIPS_MINER_KEY_ALIAS PIPS_MINER_KEYSTORE_PASSWORD PIPS_MINER_KEY_PASSWORD; do
-            if [ -z "${!value}" ]; then
-              echo "ERROR: Missing signing secret: $value"
-              exit 1
-            fi
+            [ -n "${!value}" ] || { echo "ERROR: Missing signing secret: $value"; exit 1; }
           done
-
           printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/Pips-Miner-release.jks
           keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null
-
           cat > android/key.properties <<EOF
           storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
           keyPassword=$PIPS_MINER_KEY_PASSWORD
           keyAlias=$PIPS_MINER_KEY_ALIAS
           storeFile=app/Pips-Miner-release.jks
           EOF
-
           python3 - <<'PY'
           from pathlib import Path
           import re
-          path = Path('android/app/build.gradle.kts')
-          text = path.read_text()
-          text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36', 1)
-          text = re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"', r'\1namespace = "com.example.pips_miner"', text, count=1)
+          path=Path('android/app/build.gradle.kts'); text=path.read_text()
+          text=text.replace('compileSdk = flutter.compileSdkVersion','compileSdk = 36',1)
+          text=re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"',r'\1namespace = "com.example.pips_miner"',text,count=1)
           if 'applicationId = "com.example.pips_miner"' not in text:
-              marker = text.find('defaultConfig {')
-              if marker < 0:
-                  raise SystemExit('ERROR: defaultConfig block not found')
-              insert = text.find('\n', marker) + 1
-              text = text[:insert] + '        applicationId = "com.example.pips_miner"\n' + text[insert:]
+              marker=text.find('defaultConfig {')
+              if marker<0: raise SystemExit('ERROR: defaultConfig block not found')
+              insert=text.find('\n',marker)+1
+              text=text[:insert]+'        applicationId = "com.example.pips_miner"\n'+text[insert:]
           else:
-              text = re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"', r'\1applicationId = "com.example.pips_miner"', text, count=1)
-
-          if 'isCoreLibraryDesugaringEnabled = true' not in text:
-              text = text.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
-          text = re.sub(r'(?m)^\s*coreLibraryDesugaring\(.*\)\s*$', '', text)
-
-          imports = '''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
-          if 'signingPropertiesFile' not in text:
-              text = imports + text
-
+              text=re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"',r'\1applicationId = "com.example.pips_miner"',text,count=1)
+          if 'isCoreLibraryDesugaringEnabled = true' not in text: text=text.replace('compileOptions {','compileOptions {\n        isCoreLibraryDesugaringEnabled = true',1)
+          text=re.sub(r'(?m)^\s*coreLibraryDesugaring\(.*\)\s*$','',text)
+          imports='''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
+          if 'signingPropertiesFile' not in text: text=imports+text
           if 'create("pipsMinerRelease")' not in text:
-              signing = '''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
-              text = text.replace('android {', 'android {' + signing, 1)
-
+              signing='''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
+              text=text.replace('android {','android {'+signing,1)
           if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
-              marker = text.find('buildTypes {')
-              release = text.find('release {', marker)
-              if marker < 0 or release < 0:
-                  raise SystemExit('ERROR: release build type not found')
-              insert = release + len('release {')
-              text = text[:insert] + '\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")' + text[insert:]
-
-          if 'desugar_jdk_libs:2.1.5' not in text:
-              text = text.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n'
+              marker=text.find('buildTypes {'); release=text.find('release {',marker)
+              if marker<0 or release<0: raise SystemExit('ERROR: release build type not found')
+              insert=release+len('release {')
+              text=text[:insert]+'\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")'+text[insert:]
+          if 'desugar_jdk_libs:2.1.5' not in text: text=text.rstrip()+'\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n'
           path.write_text(text)
           PY
 
@@ -127,11 +103,8 @@ jobs:
           expected='com.example.pips_miner'
           namespace=$(sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -1)
           application_id=$(sed -n 's/^[[:space:]]*applicationId[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -1)
-          echo "Expected package:      $expected"
-          echo "Android namespace:     $namespace"
-          echo "Android applicationId: $application_id"
-          test "$namespace" = "$expected"
-          test "$application_id" = "$expected"
+          echo "Expected package: $expected"; echo "Namespace: $namespace"; echo "ApplicationId: $application_id"
+          test "$namespace" = "$expected"; test "$application_id" = "$expected"
 
       - name: Install dependencies
         run: flutter pub get
@@ -157,19 +130,14 @@ jobs:
           APK='mobile_app/build/app/outputs/flutter-apk/app-release.apk'
           KEYSTORE='mobile_app/android/app/Pips-Miner-release.jks'
           expected_package='com.example.pips_miner'
-
-          actual_package=$(aapt dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
+          build_tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          actual_package=$("$build_tools/aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
           echo "APK package: $actual_package"
           test "$actual_package" = "$expected_package"
-
-          build_tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           expected_cert=$(keytool -list -v -keystore "$KEYSTORE" -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" 2>/dev/null | awk -F': ' '/SHA256:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
           actual_cert=$("$build_tools/apksigner" verify --print-certs "$APK" 2>/dev/null | awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')
-          echo "Release certificate: $expected_cert"
-          echo "APK certificate:     $actual_cert"
-          test -n "$expected_cert"
-          test -n "$actual_cert"
-          test "$expected_cert" = "$actual_cert"
+          echo "Release certificate: $expected_cert"; echo "APK certificate: $actual_cert"
+          test -n "$expected_cert"; test -n "$actual_cert"; test "$expected_cert" = "$actual_cert"
           echo 'PASS: package identity and release certificate match.'
 
       - name: Prepare release APK
