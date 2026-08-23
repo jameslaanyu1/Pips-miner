@@ -46,10 +46,12 @@ jobs:
 
           path = Path("pubspec.yaml")
           text = path.read_text()
-          # GITHUB_RUN_ID is globally unique for each workflow run and does not
-          # repeat when a workflow run is retried, unlike GITHUB_RUN_NUMBER.
+          # Keep the public version patch based on the sequential run number,
+          # while using the globally unique run ID as the Android build number.
+          # This keeps Flutter's versionCode strictly numeric and avoids release-tag collisions.
+          run_number = os.environ["GITHUB_RUN_NUMBER"]
           run_id = os.environ["GITHUB_RUN_ID"]
-          version = f"1.0.{run_id}+{run_id}"
+          version = f"1.0.{run_number}+{run_id}"
           text, count = re.subn(
               r"^version:\s*[^\n]+$",
               f"version: {version}",
@@ -61,6 +63,7 @@ jobs:
               raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
           print(f"Pips Miner release version: {version}")
+          print(f"Android build number: {run_id}")
           PY
 
       - name: Generate Android platform
