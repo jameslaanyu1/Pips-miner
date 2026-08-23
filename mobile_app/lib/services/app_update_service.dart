@@ -29,7 +29,9 @@ class AppUpdateService {
   final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 8),
-      receiveTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 60),
+      followRedirects: true,
+      validateStatus: (status) => status != null && status >= 200 && status < 300,
       headers: const {
         'Accept': 'application/vnd.github+json',
         'User-Agent': 'Pips-Miner-App',
@@ -106,7 +108,26 @@ class AppUpdateService {
 
     if (install != true || !context.mounted) return;
 
-    await _downloadAndInstall(update);
+    try {
+      await _downloadAndInstall(update);
+    } catch (_) {
+      if (!context.mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Update failed'),
+          content: const Text(
+            'The update package could not be installed. Please try again when the new release is available.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   Future<void> _downloadAndInstall(AppUpdateInfo update) async {
@@ -114,18 +135,51 @@ class AppUpdateService {
     final apkPath = '${directory.path}/Pips-Miner-${update.version}.apk';
     final file = File(apkPath);
 
+    // Never reuse a partially downloaded or corrupted APK from a previous attempt.
+    if (await file.exists()) {
+      await file.delete();
+    }
+
+    final response = await _dio.download(
+      update.downloadUrl,
+      apkPath,
+      deleteOnError: true,
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: const {
+          'Accept': 'application/octet-stream',
+          'User-Agent': 'Pips-Miner-App',
+        },
+      ),
+    );
+
+    if (response.statusCode == null ||
+        response.statusCode! < 200 ||
+        response.statusCode! >= 300) {
+      throw StateError('APK download failed with HTTP ${response.statusCode}.');
+    }
+
     if (!await file.exists()) {
-      await _dio.download(
-        update.downloadUrl,
-        apkPath,
-        options: Options(
-          responseType: ResponseType.bytes,
-          headers: const {
-            'Accept': 'application/octet-stream',
-            'User-Agent': 'Pips-Miner-App',
-          },
-        ),
-      );
+      throw StateError('APK download did not produce a file.');
+    }
+
+    final length = await file.length();
+    if (length < 1024 * 1024) {
+      throw StateError('Downloaded APK is unexpectedly small.');
+    }
+
+    // An APK is a ZIP-based package and must begin with the ZIP signature.
+    final bytes = await file.openRead(0, 4).fold<List<int>>(
+      <int>[],
+      (previous, chunk) => previous..addAll(chunk),
+    );
+    if (bytes.length < 4 ||
+        bytes[0] != 0x50 ||
+        bytes[1] != 0x4b ||
+        bytes[2] != 0x03 ||
+        bytes[3] != 0x04) {
+      await file.delete();
+      throw StateError('Downloaded file is not a valid APK package.');
     }
 
     final installer = FlutterAppInstaller();
