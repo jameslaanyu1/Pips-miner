@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_app_installer/flutter_app_installer.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -30,6 +31,7 @@ class AppUpdateService {
   static const _releasesFeedUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases.atom';
   static const _latestReleaseUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
   static const _latestApkUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
+  static const _installerChannel = MethodChannel('pips_miner/update_installer');
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 20),
@@ -93,7 +95,21 @@ class AppUpdateService {
       ),
     );
     if (install != true || !context.mounted) return result;
+
     try {
+      final installerReady = await _prepareInstaller();
+      if (!installerReady) {
+        if (!context.mounted) return result;
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Allow Pips Miner to install updates'),
+            content: const Text('Android has opened the permission screen. Allow Pips Miner to install apps from this source, then return to Pips Miner and press Update now again.'),
+            actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
+          ),
+        );
+        return result;
+      }
       await _downloadAndInstall(update);
     } catch (error) {
       if (!context.mounted) return result;
@@ -107,6 +123,12 @@ class AppUpdateService {
       );
     }
     return result;
+  }
+
+  Future<bool> _prepareInstaller() async {
+    if (!Platform.isAndroid) return true;
+    final allowed = await _installerChannel.invokeMethod<bool>('prepareInstaller') ?? true;
+    return allowed;
   }
 
   Future<void> _downloadAndInstall(AppUpdateInfo update) async {
