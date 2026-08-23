@@ -37,17 +37,13 @@ class AppUpdateService {
     followRedirects: true,
     maxRedirects: 8,
     validateStatus: (status) => status != null && status >= 200 && status < 300,
-    headers: const {
-      'Accept': 'application/atom+xml, application/xml, text/xml, */*',
-      'User-Agent': 'Pips-Miner-App',
-    },
+    headers: const {'Accept': 'application/atom+xml, application/xml, text/xml, */*', 'User-Agent': 'Pips-Miner-App'},
   ));
 
   Future<AppUpdateInfo?> checkForUpdate() async => (await checkForUpdateDetailed()).update;
 
   Future<UpdateCheckResult> checkForUpdateDetailed() async {
-    final packageInfo = await PackageInfo.fromPlatform();
-    final installedVersion = packageInfo.version;
+    final installedVersion = (await PackageInfo.fromPlatform()).version;
     try {
       final response = await _dio.get<String>(_releasesFeedUrl);
       final feed = response.data;
@@ -101,14 +97,7 @@ class AppUpdateService {
       apkPath = await _downloadApk(update, context);
     } catch (error) {
       if (!context.mounted) return result;
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Update download failed'),
-          content: Text('The new app version could not be downloaded.\n\n$error'),
-          actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
-        ),
-      );
+      await _showMessage(context, 'Update download failed', 'The new app version could not be downloaded.\n\n$error');
       return result;
     }
 
@@ -132,16 +121,20 @@ class AppUpdateService {
       await FlutterAppInstaller().installApk(filePath: apkPath);
     } catch (error) {
       if (!context.mounted) return result;
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Installation could not start'),
-          content: Text('The downloaded APK is still saved on the device.\n\n$error'),
-          actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
-        ),
-      );
+      await _showMessage(context, 'Installation could not start', 'The downloaded APK is still saved on the device.\n\n$error');
     }
     return result;
+  }
+
+  Future<void> _showMessage(BuildContext context, String title, String message) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
+      ),
+    );
   }
 
   Future<String> _downloadApk(AppUpdateInfo update, BuildContext context) async {
@@ -153,30 +146,29 @@ class AppUpdateService {
     final tempPath = '$apkPath.part';
     final tempFile = File(tempPath);
     final apkFile = File(apkPath);
-
     if (await tempFile.exists()) await tempFile.delete();
     if (await apkFile.exists()) await apkFile.delete();
 
-    await _showDownloadProgress(context, update, () async {
-      await _dio.download(
-        update.downloadUrl,
-        tempPath,
-        deleteOnError: false,
-        options: Options(
-          headers: const {
-            'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
-            'User-Agent': 'Pips-Miner-App',
-            'Accept-Encoding': 'identity',
-          },
-          responseType: ResponseType.bytes,
-        ),
-        onReceiveProgress: (received, total) {
-          if (context.mounted) {
-            _downloadProgressNotifier.value = DownloadProgress(received: received, total: total);
-          }
+    final downloadFuture = _dio.download(
+      update.downloadUrl,
+      tempPath,
+      deleteOnError: false,
+      options: Options(
+        headers: const {
+          'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
+          'User-Agent': 'Pips-Miner-App',
+          'Accept-Encoding': 'identity',
         },
-      );
-    });
+        responseType: ResponseType.bytes,
+      ),
+      onReceiveProgress: (received, total) {
+        if (context.mounted) _downloadProgressNotifier.value = DownloadProgress(received: received, total: total);
+      },
+    );
+
+    _downloadProgressNotifier.value = const DownloadProgress(received: 0, total: -1);
+    await _showDownloadProgress(context, update, downloadFuture);
+    await downloadFuture;
 
     if (!await tempFile.exists()) throw StateError('APK download did not produce a file.');
     final length = await tempFile.length();
@@ -197,55 +189,49 @@ class AppUpdateService {
 
   final ValueNotifier<DownloadProgress> _downloadProgressNotifier = ValueNotifier(const DownloadProgress(received: 0, total: -1));
 
-  Future<void> _showDownloadProgress(BuildContext context, AppUpdateInfo update, Future<void> Function() download) async {
-    _downloadProgressNotifier.value = const DownloadProgress(received: 0, total: -1);
-    final downloadFuture = download();
+  Future<void> _showDownloadProgress(BuildContext context, AppUpdateInfo update, Future<Response> downloadFuture) async {
+    final completer = Future<void>.delayed(const Duration(days: 1));
+    downloadFuture.whenComplete(() {}).then((_) {});
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
-        canPop: false,
-        child: FutureBuilder<void>(
-          future: downloadFuture,
-          builder: (_, snapshot) {
-            if (snapshot.connectionState == ConnectionState.done) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-              });
-            }
-
-            return AlertDialog(
-              title: const Text('Downloading update'),
-              content: ValueListenableBuilder<DownloadProgress>(
-                valueListenable: _downloadProgressNotifier,
-                builder: (_, progress, __) {
-                  final fraction = progress.total > 0 ? (progress.received / progress.total).clamp(0.0, 1.0) : null;
-                  final receivedText = _formatBytes(progress.received);
-                  final totalText = progress.total > 0 ? ' / ${_formatBytes(progress.total)}' : '';
-                  final percentText = fraction == null ? 'Downloading…' : '${(fraction * 100).round()}%';
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('Version ${update.version}', style: Theme.of(context).textTheme.titleSmall),
-                      const SizedBox(height: 16),
-                      LinearProgressIndicator(value: fraction),
-                      const SizedBox(height: 10),
-                      Text('$percentText  •  $receivedText$totalText'),
-                      const SizedBox(height: 6),
-                      const Text('Please keep Pips-Miner open until the download is complete.'),
-                    ],
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ),
+      builder: (dialogContext) {
+        downloadFuture.whenComplete(() {
+          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+        });
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('Downloading update'),
+            content: ValueListenableBuilder<DownloadProgress>(
+              valueListenable: _downloadProgressNotifier,
+              builder: (_, progress, __) {
+                final fraction = progress.total > 0 ? (progress.received / progress.total).clamp(0.0, 1.0) : null;
+                final receivedText = _formatBytes(progress.received);
+                final totalText = progress.total > 0 ? ' / ${_formatBytes(progress.total)}' : '';
+                final percentText = fraction == null ? 'Downloading…' : '${(fraction * 100).round()}%';
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Version ${update.version}', style: Theme.of(context).textTheme.titleSmall),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(value: fraction),
+                    const SizedBox(height: 10),
+                    Text('$percentText  •  $receivedText$totalText'),
+                    const SizedBox(height: 6),
+                    const Text('Please keep Pips-Miner open until the download is complete.'),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
 
-    await downloadFuture;
+    await completer;
   }
 
   static String _formatBytes(int bytes) {
