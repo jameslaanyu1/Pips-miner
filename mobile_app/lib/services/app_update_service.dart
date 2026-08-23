@@ -6,6 +6,22 @@ import 'package:flutter_app_installer/flutter_app_installer.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+enum UpdateCheckStatus { updateAvailable, upToDate, failed }
+
+class UpdateCheckResult {
+  const UpdateCheckResult({
+    required this.status,
+    required this.installedVersion,
+    this.update,
+    required this.message,
+  });
+
+  final UpdateCheckStatus status;
+  final String installedVersion;
+  final AppUpdateInfo? update;
+  final String message;
+}
+
 class AppUpdateInfo {
   const AppUpdateInfo({
     required this.version,
@@ -40,25 +56,46 @@ class AppUpdateService {
   );
 
   Future<AppUpdateInfo?> checkForUpdate() async {
+    final result = await checkForUpdateDetailed();
+    return result.update;
+  }
+
+  Future<UpdateCheckResult> checkForUpdateDetailed() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    final installedVersion = packageInfo.version;
+
     try {
-      final packageInfo = await PackageInfo.fromPlatform();
       final response = await _dio.get<List<dynamic>>(_releasesUrl);
       final releases = response.data;
-      if (releases == null) return null;
+      if (releases == null) {
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.failed,
+          installedVersion: installedVersion,
+          message: 'GitHub returned an empty releases response.',
+        );
+      }
 
       AppUpdateInfo? newestUpdate;
+      var publishedReleaseCount = 0;
+      var compatibleReleaseCount = 0;
+      var apkAssetCount = 0;
+      String? newestRemoteVersion;
 
       for (final release in releases) {
         if (release is! Map<String, dynamic>) continue;
         if (release['draft'] == true || release['prerelease'] == true) continue;
+        publishedReleaseCount++;
 
-        // The workflow keeps the app version in the release title. The tag is
-        // only a unique CI identifier, but is accepted as a fallback so older
-        // releases remain compatible with the updater.
         final releaseName = release['name']?.toString() ?? '';
         final releaseTag = release['tag_name']?.toString() ?? '';
         final remoteVersion = _extractVersion(releaseName, releaseTag);
         if (remoteVersion == null) continue;
+        compatibleReleaseCount++;
+
+        if (newestRemoteVersion == null ||
+            _compareVersions(remoteVersion, newestRemoteVersion) > 0) {
+          newestRemoteVersion = remoteVersion;
+        }
 
         final assets = release['assets'];
         if (assets is! List) continue;
@@ -67,6 +104,7 @@ class AppUpdateService {
         for (final asset in assets) {
           if (asset is Map<String, dynamic> &&
               asset['name']?.toString() == 'Pips-Miner-release.apk') {
+            apkAssetCount++;
             apkUrl = asset['browser_download_url']?.toString();
             break;
           }
@@ -80,7 +118,7 @@ class AppUpdateService {
           releaseUrl: releaseUrl,
         );
 
-        if (_compareVersions(candidate.version, packageInfo.version) <= 0) {
+        if (_compareVersions(candidate.version, installedVersion) <= 0) {
           continue;
         }
 
@@ -90,10 +128,26 @@ class AppUpdateService {
         }
       }
 
-      return newestUpdate;
-    } catch (_) {
-      // Update checks must never prevent Pips Miner from starting.
-      return null;
+      if (newestUpdate != null) {
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.updateAvailable,
+          installedVersion: installedVersion,
+          update: newestUpdate,
+          message: 'Update ${newestUpdate.version} found. Installed version is $installedVersion.',
+        );
+      }
+
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.upToDate,
+        installedVersion: installedVersion,
+        message: 'Installed $installedVersion; newest compatible release is ${newestRemoteVersion ?? 'none'}; published releases: $publishedReleaseCount; compatible releases: $compatibleReleaseCount; APK assets: $apkAssetCount.',
+      );
+    } catch (error) {
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.failed,
+        installedVersion: installedVersion,
+        message: 'Update check failed: ${error.runtimeType}: $error',
+      );
     }
   }
 
@@ -113,9 +167,10 @@ class AppUpdateService {
     return null;
   }
 
-  Future<void> promptIfUpdateAvailable(BuildContext context) async {
-    final update = await checkForUpdate();
-    if (update == null || !context.mounted) return;
+  Future<UpdateCheckResult> promptIfUpdateAvailable(BuildContext context) async {
+    final result = await checkForUpdateDetailed();
+    final update = result.update;
+    if (update == null || !context.mounted) return result;
 
     final install = await showDialog<bool>(
       context: context,
@@ -140,19 +195,17 @@ class AppUpdateService {
       },
     );
 
-    if (install != true || !context.mounted) return;
+    if (install != true || !context.mounted) return result;
 
     try {
       await _downloadAndInstall(update);
-    } catch (_) {
-      if (!context.mounted) return;
+    } catch (error) {
+      if (!context.mounted) return result;
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Update failed'),
-          content: const Text(
-            'The update package could not be installed. Please try again when the new release is available.',
-          ),
+          content: Text('The update package could not be installed.\n\n$error'),
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -162,6 +215,8 @@ class AppUpdateService {
         ),
       );
     }
+
+    return result;
   }
 
   Future<void> _downloadAndInstall(AppUpdateInfo update) async {
