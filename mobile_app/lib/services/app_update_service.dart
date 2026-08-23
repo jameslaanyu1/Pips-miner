@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -35,8 +36,9 @@ class AppUpdateService {
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 20),
-    receiveTimeout: const Duration(seconds: 90),
+    receiveTimeout: const Duration(minutes: 2),
     followRedirects: true,
+    maxRedirects: 8,
     validateStatus: (status) => status != null && status >= 200 && status < 300,
     headers: const {
       'Accept': 'application/atom+xml, application/xml, text/xml, */*',
@@ -113,11 +115,14 @@ class AppUpdateService {
       await _downloadAndInstall(update);
     } catch (error) {
       if (!context.mounted) return result;
+      final message = error is DioException
+          ? 'The APK download was interrupted. Please try Update now again; the download will resume from the saved data.'
+          : 'The update package could not be installed.\n\n$error';
       await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Update failed'),
-          content: Text('The update package could not be installed.\n\n$error'),
+          content: Text(message),
           actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
         ),
       );
@@ -138,21 +143,8 @@ class AppUpdateService {
     final file = File(apkPath);
     if (await file.exists()) await file.delete();
 
-    final response = await _dio.download(
-      update.downloadUrl,
-      apkPath,
-      deleteOnError: true,
-      options: Options(
-        responseType: ResponseType.bytes,
-        headers: const {
-          'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
-          'User-Agent': 'Pips-Miner-App',
-        },
-      ),
-    );
-    if (response.statusCode == null || response.statusCode! < 200 || response.statusCode! >= 300) {
-      throw StateError('APK download failed with HTTP ${response.statusCode}.');
-    }
+    await _downloadApkWithResume(update.downloadUrl, file);
+
     if (!await file.exists()) throw StateError('APK download did not produce a file.');
     final length = await file.length();
     if (length < 1024 * 1024) throw StateError('Downloaded APK is unexpectedly small.');
@@ -162,6 +154,66 @@ class AppUpdateService {
       throw StateError('Downloaded file is not a valid APK package.');
     }
     await FlutterAppInstaller().installApk(filePath: apkPath);
+  }
+
+  Future<void> _downloadApkWithResume(String url, File file) async {
+    const maxAttempts = 5;
+    Object? lastError;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final existingLength = await file.exists() ? await file.length() : 0;
+        final headers = <String, dynamic>{
+          'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
+          'User-Agent': 'Pips-Miner-App',
+          'Accept-Encoding': 'identity',
+        };
+        if (existingLength > 0) {
+          headers['Range'] = 'bytes=$existingLength-';
+        }
+
+        final response = await _dio.get<ResponseBody>(
+          url,
+          options: Options(
+            responseType: ResponseType.stream,
+            headers: headers,
+          ),
+        );
+        final status = response.statusCode ?? 0;
+        final stream = response.data?.stream;
+        if (stream == null) throw StateError('GitHub returned an empty APK download stream.');
+
+        if (existingLength > 0 && status != HttpStatus.partialContent) {
+          await stream.listen((_) {}).cancel();
+          await file.delete();
+          if (status != HttpStatus.ok) {
+            throw StateError('APK resume request returned HTTP $status.');
+          }
+          continue;
+        }
+        if (existingLength == 0 && status != HttpStatus.ok && status != HttpStatus.partialContent) {
+          await stream.listen((_) {}).cancel();
+          throw StateError('APK download returned HTTP $status.');
+        }
+
+        final sink = file.openWrite(
+          mode: existingLength > 0 ? FileMode.append : FileMode.write,
+        );
+        try {
+          await stream.pipe(sink);
+        } finally {
+          await sink.close();
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt == maxAttempts) break;
+        await Future<void>.delayed(Duration(milliseconds: 800 * attempt));
+      }
+    }
+
+    if (lastError != null) throw lastError!;
+    throw StateError('APK download failed without a reported error.');
   }
 
   static int _compareVersions(String left, String right) {
