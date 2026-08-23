@@ -89,7 +89,14 @@ jobs:
             exit 1
           fi
 
-          printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | base64 --decode > android/app/Pips-Miner-release.jks
+          KEYSTORE_B64="$(printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]')"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > android/app/Pips-Miner-release.jks
+
+          if ! keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+            echo "ERROR: GitHub keystore secret could not be decoded or authenticated."
+            exit 1
+          fi
+          echo "Pips Miner signing keystore validated successfully."
 
           cat > android/key.properties <<EOF
           storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
