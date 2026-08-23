@@ -46,6 +46,7 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   Timer? _updateTimer;
   bool _updatePromptOpen = false;
+  bool _initialUpdateCheckReported = false;
 
   final List<Widget> _screens = const [
     HomeScreen(),
@@ -66,7 +67,23 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted || _updatePromptOpen) return;
     _updatePromptOpen = true;
     try {
-      await AppUpdateService.instance.promptIfUpdateAvailable(context);
+      final result = await AppUpdateService.instance.promptIfUpdateAvailable(context);
+
+      // The first automatic check reports its exact decision once. This makes
+      // update failures/version mismatches visible instead of silently hiding
+      // them, while keeping subsequent background checks quiet.
+      if (!_initialUpdateCheckReported && mounted &&
+          result.status != UpdateCheckStatus.updateAvailable) {
+        _initialUpdateCheckReported = true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      } else if (!_initialUpdateCheckReported) {
+        _initialUpdateCheckReported = true;
+      }
     } finally {
       _updatePromptOpen = false;
     }
