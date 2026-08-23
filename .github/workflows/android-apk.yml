@@ -9,13 +9,9 @@ on:
 permissions:
   contents: write
 
-# Every main-branch update must produce a fresh APK and latest GitHub release.
-# This also provides a simple trigger point for the automatic in-app updater.
-
 jobs:
   build-release-apk:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: mobile_app
@@ -43,20 +39,11 @@ jobs:
           from pathlib import Path
           import os
           import re
-
           path = Path("pubspec.yaml")
           text = path.read_text()
-          run_id = os.environ["GITHUB_RUN_ID"]
-          # Keep Flutter's version/build metadata strictly numeric for Android.
-          # The Android Gradle script is also patched below to use run_id directly.
-          version = f"1.0.{os.environ['GITHUB_RUN_NUMBER']}+{run_id}"
-          text, count = re.subn(
-              r"^version:\s*[^\n]+$",
-              f"version: {version}",
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
+          run_number = os.environ["GITHUB_RUN_NUMBER"]
+          version = f"1.0.{run_number}+{run_number}"
+          text, count = re.subn(r"^version:\s*[^\n]+$", f"version: {version}", text, count=1, flags=re.MULTILINE)
           if count != 1:
               raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
@@ -71,39 +58,15 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-
           gradle = Path("android/app/build.gradle.kts")
           if not gradle.exists():
               raise SystemExit("ERROR: Android app Gradle file not found")
-
           text = gradle.read_text()
-
-          # Flutter 3.35's generated Kotlin Gradle file can expose the pubspec
-          # build number as a String. Android's versionCode must be an Int.
-          # Use the numeric GitHub run ID explicitly so this can never fail the
-          # release build because of Flutter/Gradle type conversion.
-          text = re.sub(
-              r"(?m)^\s*val flutterVersionCode\s*=\s*flutter\.versionCode\s*$",
-              'val flutterVersionCode: Int = System.getenv("GITHUB_RUN_ID")?.toIntOrNull() ?: 1',
-              text,
-          )
-          text = re.sub(
-              r"(?m)^\s*val flutterVersionName\s*=\s*flutter\.versionName\s*$",
-              'val flutterVersionName: String = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "1"}"',
-              text,
-          )
-
           text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
-
           if "isCoreLibraryDesugaringEnabled = true" not in text:
               if "compileOptions {" not in text:
-                  raise SystemExit("ERROR: compileOptions block not found in Android Gradle file")
-              text = text.replace(
-                  "compileOptions {",
-                  "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
-                  1,
-              )
-
+                  raise SystemExit("ERROR: compileOptions block not found")
+              text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
           text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
           text = text.rstrip() + "\n\ndependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n}\n"
           gradle.write_text(text)
@@ -124,25 +87,13 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text()
-
           if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
-              text = text.replace(
-                  'xmlns:android="http://schemas.android.com/apk/res/android"',
-                  'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"',
-                  1,
-              )
-
-          permissions = [
-              '<uses-permission android:name="android.permission.INTERNET" />',
-              '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
-          ]
-          for permission in permissions:
+              text = text.replace('xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"', 1)
+          for permission in ['<uses-permission android:name="android.permission.INTERNET" />', '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />']:
               if permission not in text:
                   text = text.replace("<application", permission + "\n    <application", 1)
-
           provider = '''    <provider
               android:name="androidx.core.content.FileProvider"
               android:authorities="${applicationId}.fileProvider"
@@ -155,10 +106,8 @@ jobs:
                   tools:replace="android:resource" />
           </provider>
           '''
-
           if "${applicationId}.fileProvider" not in text:
               text = text.replace("</application>", provider + "</application>", 1)
-
           text = text.replace('android:label="pips_miner"', 'android:label="Pips Miner"')
           text = text.replace('android:label="pips_miner_app"', 'android:label="Pips Miner"')
           manifest.write_text(text)
@@ -177,7 +126,7 @@ jobs:
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
 
       - name: Prepare release APK
         working-directory: .
@@ -196,10 +145,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           RELEASE_TAG="v1.0.${GITHUB_RUN_ID}"
-          RELEASE_TITLE="Pips Miner v1.0.${GITHUB_RUN_ID}"
-
-          gh release create "${RELEASE_TAG}" \
-            Pips-Miner-release.apk \
+          RELEASE_TITLE="Pips Miner v1.0.${GITHUB_RUN_NUMBER}"
+          gh release create "${RELEASE_TAG}" Pips-Miner-release.apk \
             --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
             --title "${RELEASE_TITLE}" \
