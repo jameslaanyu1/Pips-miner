@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_app_installer/flutter_app_installer.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -31,6 +32,7 @@ class AppUpdateService {
   static const _releasesFeedUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases.atom';
   static const _latestReleaseUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
   static const _latestApkUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
+  static const _installerChannel = MethodChannel('pips_miner/update_installer');
 
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 20),
@@ -107,9 +109,27 @@ class AppUpdateService {
 
     if (!context.mounted || apkPath == null) return result;
 
-    // The APK is verified and stored locally before this point. Installation
-    // starts automatically as soon as the download-progress dialog closes.
+    // The Android build creates this native bridge. It checks whether this
+    // app is allowed to request package installs and opens the Android setting
+    // when approval is required. We poll after returning so installation can
+    // continue automatically without another Update button.
     try {
+      var installerReady = await _installerChannel.invokeMethod<bool>('prepareInstaller') ?? true;
+      if (!installerReady) {
+        for (var attempt = 0; attempt < 60 && !installerReady; attempt++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          if (!context.mounted) return result;
+          installerReady = await _installerChannel.invokeMethod<bool>('prepareInstaller') ?? false;
+        }
+      }
+
+      if (!installerReady) {
+        if (context.mounted) {
+          await _showMessage(context, 'Installation permission required', 'Android did not allow Pips-Miner to start the installer. The downloaded APK remains saved on the device.');
+        }
+        return result;
+      }
+
       await FlutterAppInstaller().installApk(filePath: apkPath);
     } catch (error) {
       if (!context.mounted) return result;
@@ -155,8 +175,6 @@ class AppUpdateService {
         responseType: ResponseType.bytes,
       ),
       onReceiveProgress: (received, total) {
-        // Throttle UI updates so progress rendering does not compete with the
-        // network stream on slower Android devices.
         final now = DateTime.now();
         if (_lastProgressUpdate == null || now.difference(_lastProgressUpdate!) >= const Duration(milliseconds: 250) || (total > 0 && received >= total)) {
           _lastProgressUpdate = now;
