@@ -79,19 +79,19 @@ jobs:
 
       - name: Configure Android build, signing and update installer
         env:
-          PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
+          PIPS_MINER_KEYSTORE_HEX: ${{ secrets.PIPS_MINER_KEYSTORE_HEX }}
           PIPS_MINER_KEY_ALIAS: ${{ secrets.PIPS_MINER_KEY_ALIAS }}
           PIPS_MINER_KEYSTORE_PASSWORD: ${{ secrets.PIPS_MINER_KEYSTORE_PASSWORD }}
           PIPS_MINER_KEY_PASSWORD: ${{ secrets.PIPS_MINER_KEY_PASSWORD }}
         run: |
-          if [ -z "$PIPS_MINER_KEYSTORE_BASE64" ] || [ -z "$PIPS_MINER_KEY_ALIAS" ] || [ -z "$PIPS_MINER_KEYSTORE_PASSWORD" ] || [ -z "$PIPS_MINER_KEY_PASSWORD" ]; then
+          if [ -z "$PIPS_MINER_KEYSTORE_HEX" ] || [ -z "$PIPS_MINER_KEY_ALIAS" ] || [ -z "$PIPS_MINER_KEYSTORE_PASSWORD" ] || [ -z "$PIPS_MINER_KEY_PASSWORD" ]; then
             echo "ERROR: One or more Pips Miner signing secrets are missing."
             exit 1
           fi
 
-          KEYSTORE_B64="$(printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]')"
-          if ! printf '%s' "$KEYSTORE_B64" | base64 --decode --ignore-garbage > android/app/Pips-Miner-release.jks; then
-            echo "ERROR: PIPS_MINER_KEYSTORE_BASE64 is not valid Base64."
+          KEYSTORE_HEX="$(printf '%s' "$PIPS_MINER_KEYSTORE_HEX" | tr -d '[:space:]')"
+          if ! printf '%s' "$KEYSTORE_HEX" | xxd -r -p > android/app/Pips-Miner-release.jks; then
+            echo "ERROR: PIPS_MINER_KEYSTORE_HEX could not be decoded."
             exit 1
           fi
 
