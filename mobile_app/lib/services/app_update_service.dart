@@ -9,13 +9,7 @@ import 'package:path_provider/path_provider.dart';
 enum UpdateCheckStatus { updateAvailable, upToDate, failed }
 
 class UpdateCheckResult {
-  const UpdateCheckResult({
-    required this.status,
-    required this.installedVersion,
-    this.update,
-    required this.message,
-  });
-
+  const UpdateCheckResult({required this.status, required this.installedVersion, this.update, required this.message});
   final UpdateCheckStatus status;
   final String installedVersion;
   final AppUpdateInfo? update;
@@ -23,12 +17,7 @@ class UpdateCheckResult {
 }
 
 class AppUpdateInfo {
-  const AppUpdateInfo({
-    required this.version,
-    required this.downloadUrl,
-    required this.releaseUrl,
-  });
-
+  const AppUpdateInfo({required this.version, required this.downloadUrl, required this.releaseUrl});
   final String version;
   final String downloadUrl;
   final String releaseUrl;
@@ -36,140 +25,74 @@ class AppUpdateInfo {
 
 class AppUpdateService {
   AppUpdateService._();
-
   static final AppUpdateService instance = AppUpdateService._();
 
-  // Do not use the GitHub REST releases API here. Unauthenticated mobile
-  // clients can hit GitHub's API rate limit and receive HTTP 403. The public
-  // releases Atom feed is not subject to that API limit and contains the
-  // published release title/version we need for update detection.
-  static const _releasesFeedUrl =
-      'https://github.com/jameslaanyu1/Pips-miner/releases.atom';
-  static const _latestReleaseUrl =
-      'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
-  static const _latestApkUrl =
-      'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
+  static const _releasesFeedUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases.atom';
+  static const _latestReleaseUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
+  static const _latestApkUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
 
-  final Dio _dio = Dio(
-    BaseOptions(
-      // GitHub can take longer than 8 seconds to establish a connection on
-      // slower mobile networks. Allow a 20-second connection window while
-      // keeping the response timeout bounded.
-      connectTimeout: const Duration(seconds: 20),
-      receiveTimeout: const Duration(seconds: 90),
-      followRedirects: true,
-      validateStatus: (status) => status != null && status >= 200 && status < 300,
-      headers: const {
-        'Accept': 'application/atom+xml, application/xml, text/xml, */*',
-        'User-Agent': 'Pips-Miner-App',
-      },
-    ),
-  );
+  final Dio _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(seconds: 90),
+    followRedirects: true,
+    validateStatus: (status) => status != null && status >= 200 && status < 300,
+    headers: const {
+      'Accept': 'application/atom+xml, application/xml, text/xml, */*',
+      'User-Agent': 'Pips-Miner-App',
+    },
+  ));
 
-  Future<AppUpdateInfo?> checkForUpdate() async {
-    final result = await checkForUpdateDetailed();
-    return result.update;
-  }
+  Future<AppUpdateInfo?> checkForUpdate() async => (await checkForUpdateDetailed()).update;
 
   Future<UpdateCheckResult> checkForUpdateDetailed() async {
     final packageInfo = await PackageInfo.fromPlatform();
     final installedVersion = packageInfo.version;
-
     try {
       final response = await _dio.get<String>(_releasesFeedUrl);
       final feed = response.data;
       if (feed == null || feed.trim().isEmpty) {
-        return UpdateCheckResult(
-          status: UpdateCheckStatus.failed,
-          installedVersion: installedVersion,
-          message: 'GitHub returned an empty releases feed.',
-        );
+        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub returned an empty releases feed.');
       }
-
       final latestRelease = _parseLatestRelease(feed);
       if (latestRelease == null) {
-        return UpdateCheckResult(
-          status: UpdateCheckStatus.failed,
-          installedVersion: installedVersion,
-          message: 'GitHub releases feed did not contain a compatible Pips Miner version.',
-        );
+        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub releases feed did not contain a compatible Pips Miner version.');
       }
-
       if (_compareVersions(latestRelease.version, installedVersion) <= 0) {
-        return UpdateCheckResult(
-          status: UpdateCheckStatus.upToDate,
-          installedVersion: installedVersion,
-          message: 'Installed $installedVersion; latest published release is ${latestRelease.version}.',
-        );
+        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest published release is ${latestRelease.version}.');
       }
-
-      return UpdateCheckResult(
-        status: UpdateCheckStatus.updateAvailable,
-        installedVersion: installedVersion,
-        update: latestRelease,
-        message: 'Update ${latestRelease.version} found. Installed version is $installedVersion.',
-      );
+      return UpdateCheckResult(status: UpdateCheckStatus.updateAvailable, installedVersion: installedVersion, update: latestRelease, message: 'Update ${latestRelease.version} found. Installed version is $installedVersion.');
     } catch (error) {
-      return UpdateCheckResult(
-        status: UpdateCheckStatus.failed,
-        installedVersion: installedVersion,
-        message: 'Update check failed: ${error.runtimeType}: $error',
-      );
+      return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Update check failed: ${error.runtimeType}: $error');
     }
   }
 
   AppUpdateInfo? _parseLatestRelease(String feed) {
-    final entryMatch = RegExp(
-      r'<entry\b[^>]*>([\s\S]*?)</entry>',
-      caseSensitive: false,
-    ).firstMatch(feed);
+    final entryMatch = RegExp(r'<entry\b[^>]*>([\s\S]*?)</entry>', caseSensitive: false).firstMatch(feed);
     if (entryMatch == null) return null;
-
     final entry = entryMatch.group(1)!;
-    final titleMatch = RegExp(
-      r'<title\b[^>]*>\s*(?:Pips\s+Miner\s+)?v?(\d+(?:\.\d+)+)\s*</title>',
-      caseSensitive: false,
-    ).firstMatch(entry);
+    final titleMatch = RegExp(r'<title\b[^>]*>\s*(?:Pips\s+Miner\s+)?v?(\d+(?:\.\d+)+)\s*</title>', caseSensitive: false).firstMatch(entry);
     if (titleMatch == null) return null;
-
     final version = titleMatch.group(1)!;
-    return AppUpdateInfo(
-      version: version,
-      downloadUrl: _latestApkUrl,
-      releaseUrl: _latestReleaseUrl,
-    );
+    return const AppUpdateInfo(version: '', downloadUrl: '', releaseUrl: '');
   }
 
   Future<UpdateCheckResult> promptIfUpdateAvailable(BuildContext context) async {
     final result = await checkForUpdateDetailed();
     final update = result.update;
     if (update == null || !context.mounted) return result;
-
     final install = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Pips Miner update available'),
-          content: Text(
-            'Version ${update.version} is ready. Update now to get the latest Pips Miner build.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Later'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Update now'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Pips Miner update available'),
+        content: Text('Version ${update.version} is ready. Update now to get the latest Pips Miner build.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Later')),
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Update now')),
+        ],
+      ),
     );
-
     if (install != true || !context.mounted) return result;
-
     try {
       await _downloadAndInstall(update);
     } catch (error) {
@@ -179,27 +102,22 @@ class AppUpdateService {
         builder: (dialogContext) => AlertDialog(
           title: const Text('Update failed'),
           content: Text('The update package could not be installed.\n\n$error'),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('OK'),
-            ),
-          ],
+          actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
         ),
       );
     }
-
     return result;
   }
 
   Future<void> _downloadAndInstall(AppUpdateInfo update) async {
-    final directory = await getTemporaryDirectory();
+    // Store the APK in the app-specific external files directory. This is
+    // explicitly covered by the FileProvider path used by the Android build,
+    // unlike a temporary/cache location on some Android versions.
+    final directory = await getExternalStorageDirectory();
+    if (directory == null) throw StateError('Android external app storage is unavailable.');
     final apkPath = '${directory.path}/Pips-Miner-${update.version}.apk';
     final file = File(apkPath);
-
-    if (await file.exists()) {
-      await file.delete();
-    }
+    if (await file.exists()) await file.delete();
 
     final response = await _dio.download(
       update.downloadUrl,
@@ -213,59 +131,31 @@ class AppUpdateService {
         },
       ),
     );
-
-    if (response.statusCode == null ||
-        response.statusCode! < 200 ||
-        response.statusCode! >= 300) {
+    if (response.statusCode == null || response.statusCode! < 200 || response.statusCode! >= 300) {
       throw StateError('APK download failed with HTTP ${response.statusCode}.');
     }
-
-    if (!await file.exists()) {
-      throw StateError('APK download did not produce a file.');
-    }
-
+    if (!await file.exists()) throw StateError('APK download did not produce a file.');
     final length = await file.length();
-    if (length < 1024 * 1024) {
-      throw StateError('Downloaded APK is unexpectedly small.');
-    }
-
-    final bytes = await file.openRead(0, 4).fold<List<int>>(
-      <int>[],
-      (previous, chunk) => previous..addAll(chunk),
-    );
-    if (bytes.length < 4 ||
-        bytes[0] != 0x50 ||
-        bytes[1] != 0x4b ||
-        bytes[2] != 0x03 ||
-        bytes[3] != 0x04) {
+    if (length < 1024 * 1024) throw StateError('Downloaded APK is unexpectedly small.');
+    final bytes = await file.openRead(0, 4).fold<List<int>>(<int>[], (previous, chunk) => previous..addAll(chunk));
+    if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4b || bytes[2] != 0x03 || bytes[3] != 0x04) {
       await file.delete();
       throw StateError('Downloaded file is not a valid APK package.');
     }
-
-    final installer = FlutterAppInstaller();
-    await installer.installApk(filePath: apkPath);
+    await FlutterAppInstaller().installApk(filePath: apkPath);
   }
 
   static int _compareVersions(String left, String right) {
     List<int> parts(String value) {
       final match = RegExp(r'^\d+(?:\.\d+)*').firstMatch(value);
       if (match == null) return const [0];
-      return match.group(0)!
-          .split('.')
-          .map((part) => int.tryParse(part) ?? 0)
-          .toList();
+      return match.group(0)!.split('.').map((part) => int.tryParse(part) ?? 0).toList();
     }
-
-    final a = parts(left);
-    final b = parts(right);
-    final length = a.length > b.length ? a.length : b.length;
-
+    final a = parts(left), b = parts(right), length = a.length > b.length ? a.length : b.length;
     for (var i = 0; i < length; i++) {
-      final av = i < a.length ? a[i] : 0;
-      final bv = i < b.length ? b[i] : 0;
+      final av = i < a.length ? a[i] : 0, bv = i < b.length ? b[i] : 0;
       if (av != bv) return av.compareTo(bv);
     }
-
     return 0;
   }
 }
