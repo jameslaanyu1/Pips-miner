@@ -24,33 +24,23 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
           path = Path("lib/screens/settings_screen.dart")
           text = path.read_text()
-          pattern = r"Text\(\s*'Pips-Miner',\s*style: TextStyle\(.*?\),\s*\),\s*SizedBox\(height: 2\),\s*Text\(\s*'ENGINE SETTINGS',\s*style: TextStyle\(.*?\),\s*\),"
-          replacement = """Text(
-                  'Pips-Miner',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'life changing pips',
-                  style: TextStyle(
-                    color: Color(0xFFFFD54F),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: .8,
-                  ),
-                ),"""
-          updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)
-          if count != 1:
-              raise SystemExit("ERROR: Could not locate settings header for branding update")
-          path.write_text(updated)
-          print("Settings header updated: Pips-Miner / life changing pips (gold)")
+          start = text.find("class _SettingsHeader extends StatelessWidget")
+          end = text.find("class _ConnectionSection", start)
+          if start < 0 or end < 0:
+              raise SystemExit("ERROR: _SettingsHeader section not found")
+          header = text[start:end]
+          if "'Pips-Miner'" not in header:
+              raise SystemExit("ERROR: Pips-Miner title not found")
+          if "'ENGINE SETTINGS'" in header:
+              header = header.replace("'ENGINE SETTINGS'", "'life changing pips'", 1)
+              header = header.replace("color: Colors.white38,", "color: AppTheme.accentColor,", 1)
+              text = text[:start] + header + text[end:]
+              path.write_text(text)
+          elif "'life changing pips'" not in header:
+              raise SystemExit("ERROR: settings motto not found")
+          print("Settings header: Pips-Miner / life changing pips (gold)")
           PY
 
       - name: Set up Java
