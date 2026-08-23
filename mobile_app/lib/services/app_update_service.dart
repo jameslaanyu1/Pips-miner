@@ -166,16 +166,11 @@ class AppUpdateService {
           'User-Agent': 'Pips-Miner-App',
           'Accept-Encoding': 'identity',
         };
-        if (existingLength > 0) {
-          headers['Range'] = 'bytes=$existingLength-';
-        }
+        if (existingLength > 0) headers['Range'] = 'bytes=$existingLength-';
 
         final response = await _dio.get<ResponseBody>(
           url,
-          options: Options(
-            responseType: ResponseType.stream,
-            headers: headers,
-          ),
+          options: Options(responseType: ResponseType.stream, headers: headers),
         );
         final status = response.statusCode ?? 0;
         final stream = response.data?.stream;
@@ -184,9 +179,7 @@ class AppUpdateService {
         if (existingLength > 0 && status != HttpStatus.partialContent) {
           await stream.listen((_) {}).cancel();
           await file.delete();
-          if (status != HttpStatus.ok) {
-            throw StateError('APK resume request returned HTTP $status.');
-          }
+          if (status != HttpStatus.ok) throw StateError('APK resume request returned HTTP $status.');
           continue;
         }
         if (existingLength == 0 && status != HttpStatus.ok && status != HttpStatus.partialContent) {
@@ -194,11 +187,9 @@ class AppUpdateService {
           throw StateError('APK download returned HTTP $status.');
         }
 
-        final sink = file.openWrite(
-          mode: existingLength > 0 ? FileMode.append : FileMode.write,
-        );
+        final sink = file.openWrite(mode: existingLength > 0 ? FileMode.append : FileMode.write);
         try {
-          await stream.pipe(sink);
+          await stream.forEach(sink.add);
         } finally {
           await sink.close();
         }
@@ -210,7 +201,7 @@ class AppUpdateService {
       }
     }
 
-    if (lastError != null) throw lastError!;
+    if (lastError != null) throw lastError;
     throw StateError('APK download failed without a reported error.');
   }
 
