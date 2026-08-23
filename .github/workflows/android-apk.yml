@@ -219,4 +219,4 @@ class MainActivity : FlutterActivity() {{
           generate_release_notes: true
           make_latest: true
           files: Pips-Miner-release.apk
-          token: ${{ secrets.PIPS_MINER_RELEASE_TOKEN }}
+          token: ${{ github.token }}
