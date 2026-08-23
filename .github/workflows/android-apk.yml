@@ -39,11 +39,18 @@ jobs:
           from pathlib import Path
           import os
           import re
+
           path = Path("pubspec.yaml")
           text = path.read_text()
-          run_number = os.environ["GITHUB_RUN_NUMBER"]
-          version = f"1.0.{run_number}+{run_number}"
-          text, count = re.subn(r"^version:\s*[^\n]+$", f"version: {version}", text, count=1, flags=re.MULTILINE)
+          release_id = os.environ["GITHUB_RUN_ID"]
+          version = f"1.0.{release_id}+{release_id}"
+          text, count = re.subn(
+              r"^version:\s*[^\n]+$",
+              f"version: {version}",
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
           if count != 1:
               raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
@@ -58,6 +65,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
+
           gradle = Path("android/app/build.gradle.kts")
           if not gradle.exists():
               raise SystemExit("ERROR: Android app Gradle file not found")
@@ -66,7 +74,11 @@ jobs:
           if "isCoreLibraryDesugaringEnabled = true" not in text:
               if "compileOptions {" not in text:
                   raise SystemExit("ERROR: compileOptions block not found")
-              text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
+              text = text.replace(
+                  "compileOptions {",
+                  "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
+                  1,
+              )
           text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
           text = text.rstrip() + "\n\ndependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n}\n"
           gradle.write_text(text)
@@ -87,11 +99,19 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
+
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text()
           if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
-              text = text.replace('xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"', 1)
-          for permission in ['<uses-permission android:name="android.permission.INTERNET" />', '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />']:
+              text = text.replace(
+                  'xmlns:android="http://schemas.android.com/apk/res/android"',
+                  'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"',
+                  1,
+              )
+          for permission in [
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
+          ]:
               if permission not in text:
                   text = text.replace("<application", permission + "\n    <application", 1)
           provider = '''    <provider
@@ -126,7 +146,7 @@ jobs:
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Build release APK
-        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
+        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_ID}" --build-number="${GITHUB_RUN_ID}"
 
       - name: Prepare release APK
         working-directory: .
@@ -145,7 +165,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           RELEASE_TAG="v1.0.${GITHUB_RUN_ID}"
-          RELEASE_TITLE="Pips Miner v1.0.${GITHUB_RUN_NUMBER}"
+          RELEASE_TITLE="Pips Miner v1.0.${GITHUB_RUN_ID}"
           gh release create "${RELEASE_TAG}" Pips-Miner-release.apk \
             --repo "${GITHUB_REPOSITORY}" \
             --target "${GITHUB_SHA}" \
