@@ -90,10 +90,8 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     final error = bot.connectionError;
-    if (!_wasConnected && !_lastConnectionErrorEquals(error)) {
-      if (error != null && error.isNotEmpty && !bot.isConnected) {
-        unawaited(PipsNotificationService.instance.mt5ConnectionFailed(error));
-      }
+    if (error != null && error.isNotEmpty && error != _lastConnectionError && !bot.isConnected) {
+      unawaited(PipsNotificationService.instance.mt5ConnectionFailed(error));
     }
 
     if (!_wasBotRunning && bot.isBotRunning) {
@@ -110,10 +108,6 @@ class _MainScreenState extends State<MainScreen> {
     _wasBotRunning = bot.isBotRunning;
     _wasLiveAccount = bot.isLiveAccount;
     _lastConnectionError = error;
-  }
-
-  bool _lastConnectionErrorEquals(String? error) {
-    return error == _lastConnectionError;
   }
 
   Future<void> _checkForUpdate() async {
