@@ -77,8 +77,27 @@ jobs:
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner .
 
-      - name: Configure Android build and update installer
+      - name: Configure Android build, signing and update installer
+        env:
+          PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
+          PIPS_MINER_KEY_ALIAS: ${{ secrets.PIPS_MINER_KEY_ALIAS }}
+          PIPS_MINER_KEYSTORE_PASSWORD: ${{ secrets.PIPS_MINER_KEYSTORE_PASSWORD }}
+          PIPS_MINER_KEY_PASSWORD: ${{ secrets.PIPS_MINER_KEY_PASSWORD }}
         run: |
+          if [ -z "$PIPS_MINER_KEYSTORE_BASE64" ] || [ -z "$PIPS_MINER_KEY_ALIAS" ] || [ -z "$PIPS_MINER_KEYSTORE_PASSWORD" ] || [ -z "$PIPS_MINER_KEY_PASSWORD" ]; then
+            echo "ERROR: One or more Pips Miner signing secrets are missing."
+            exit 1
+          fi
+
+          printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | base64 --decode > android/app/Pips-Miner-release.jks
+
+          cat > android/key.properties <<EOF
+          storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
+          keyPassword=$PIPS_MINER_KEY_PASSWORD
+          keyAlias=$PIPS_MINER_KEY_ALIAS
+          storeFile=app/Pips-Miner-release.jks
+          EOF
+
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -92,6 +111,30 @@ jobs:
                   raise SystemExit("ERROR: compileOptions block not found")
               text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
           text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
+          imports = '''import java.util.Properties
+          import java.io.FileInputStream
+
+          val signingProperties = Properties()
+          val signingPropertiesFile = rootProject.file("key.properties")
+          if (signingPropertiesFile.exists()) {
+              signingProperties.load(FileInputStream(signingPropertiesFile))
+          }
+
+          '''
+          if 'signingPropertiesFile' not in text:
+              text = imports + text
+          if 'signingConfigs {' not in text:
+              text = text.replace('android {', '''android {
+              signingConfigs {
+                  create("release") {
+                      keyAlias = signingProperties.getProperty("keyAlias")
+                      keyPassword = signingProperties.getProperty("keyPassword")
+                      storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }
+                      storePassword = signingProperties.getProperty("storePassword")
+                  }
+              }''', 1)
+          if 'signingConfig = signingConfigs.getByName("release")' not in text:
+              text = text.replace('release {', 'release {\n            signingConfig = signingConfigs.getByName("release")', 1)
           text = text.rstrip() + "\n\ndependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n}\n"
           gradle.write_text(text)
           PY
@@ -151,6 +194,11 @@ jobs:
 
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
+
+      - name: Verify APK signing certificate
+        working-directory: .
+        run: |
+          $ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner verify --print-certs mobile_app/build/app/outputs/flutter-apk/app-release.apk
 
       - name: Prepare release APK
         working-directory: .
