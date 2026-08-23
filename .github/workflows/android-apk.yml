@@ -64,13 +64,7 @@ jobs:
           path = Path("pubspec.yaml")
           text = path.read_text()
           run_number = os.environ["GITHUB_RUN_NUMBER"]
-          text, count = re.subn(
-              r"^version:\s*[^\n]+$",
-              f"version: 1.0.{run_number}+{run_number}",
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
+          text, count = re.subn(r"^version:\s*[^\n]+$", f"version: 1.0.{run_number}+{run_number}", text, count=1, flags=re.MULTILINE)
           if count != 1:
               raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
@@ -80,7 +74,7 @@ jobs:
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner .
 
-      - name: Configure Android build, signing and update installer
+      - name: Configure Android build, signing and native update installer
         env:
           PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
           PIPS_MINER_KEY_ALIAS: ${{ secrets.PIPS_MINER_KEY_ALIAS }}
@@ -95,12 +89,7 @@ jobs:
           fi
 
           printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/Pips-Miner-release.jks
-
-          if ! keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
-            echo "ERROR: Decoded keystore is invalid, incomplete, or the keystore password/alias is wrong."
-            exit 1
-          fi
-          echo "Pips Miner signing keystore validated successfully."
+          keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null
 
           cat > android/key.properties <<EOF
           storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
@@ -113,13 +102,9 @@ jobs:
           from pathlib import Path
           import re
           gradle = Path("android/app/build.gradle.kts")
-          if not gradle.exists():
-              raise SystemExit("ERROR: Android app Gradle file not found")
           text = gradle.read_text()
           text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
           if "isCoreLibraryDesugaringEnabled = true" not in text:
-              if "compileOptions {" not in text:
-                  raise SystemExit("ERROR: compileOptions block not found")
               text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
           text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
           imports = """import java.util.Properties
@@ -128,8 +113,7 @@ jobs:
           val signingPropertiesFile = rootProject.file(\"key.properties\")
           if (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))
           """
-          if "signingPropertiesFile" not in text:
-              text = imports + text
+          if "signingPropertiesFile" not in text: text = imports + text
           if "signingConfigs {" not in text:
               text = text.replace("android {", """android {
               signingConfigs {
@@ -154,13 +138,11 @@ jobs:
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/file_paths.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
-          <paths>
-              <external-path name="external-path" path="." />
-              <external-cache-path name="external-cache-path" path="." />
-              <external-files-path name="external-files-path" path="." />
-              <files-path name="files-path" path="." />
-              <cache-path name="cache-path" path="." />
-              <root-path name="root" path="." />
+          <paths xmlns:android="http://schemas.android.com/apk/res/android">
+              <external-files-path name="external_files" path="." />
+              <external-cache-path name="external_cache" path="." />
+              <files-path name="files" path="." />
+              <cache-path name="cache" path="." />
           </paths>
           XML
 
@@ -169,39 +151,24 @@ jobs:
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text()
           if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
-              text = text.replace(
-                  'xmlns:android="http://schemas.android.com/apk/res/android"',
-                  'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"',
-                  1,
-              )
-          for permission in [
-              '<uses-permission android:name="android.permission.INTERNET" />',
-              '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
-          ]:
-              if permission not in text:
-                  text = text.replace("<application", permission + "\n    <application", 1)
+              text = text.replace('xmlns:android="http://schemas.android.com/apk/res/android"', 'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"', 1)
+          permission = '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
+          if permission not in text: text = text.replace('<application', permission + '\n    <application', 1)
           provider = '''    <provider
               android:name="androidx.core.content.FileProvider"
               android:authorities="${applicationId}.fileProvider"
               android:exported="false"
-              android:grantUriPermissions="true"
-              tools:replace="android:authorities">
-              <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" tools:replace="android:resource" />
+              android:grantUriPermissions="true">
+              <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
           </provider>
           '''
-          if "${applicationId}.fileProvider" not in text:
-              text = text.replace("</application>", provider + "</application>", 1)
-          text = text.replace('android:label="pips_miner"', 'android:label="Pips Miner"')
-          text = text.replace('android:label="pips_miner_app"', 'android:label="Pips Miner"')
+          if 'androidx.core.content.FileProvider' not in text: text = text.replace('</application>', provider + '</application>', 1)
+          text = text.replace('android:label="pips_miner"', 'android:label="Pips Miner"').replace('android:label="pips_miner_app"', 'android:label="Pips Miner"')
           manifest.write_text(text)
           PY
 
-          gradle_text=$(cat android/app/build.gradle.kts)
-          namespace=$(printf '%s\n' "$gradle_text" | sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
-          if [ -z "$namespace" ]; then
-            echo "ERROR: Android namespace not found"
-            exit 1
-          fi
+          namespace=$(sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)
+          test -n "$namespace"
           package_path="android/app/src/main/kotlin/${namespace//./\/}"
           mkdir -p "$package_path"
           cat > "$package_path/MainActivity.kt" <<'KOTLIN'
@@ -211,36 +178,73 @@ jobs:
           import android.net.Uri
           import android.os.Build
           import android.provider.Settings
+          import androidx.core.content.FileProvider
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
+          import java.io.File
 
           class MainActivity : FlutterActivity() {
+              private val channelName = "pips_miner/update_installer"
+
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pips_miner/update_installer")
-                      .setMethodCallHandler { call, result ->
-                          when (call.method) {
-                              "prepareInstaller" -> {
-                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-                                      val intent = Intent(
-                                          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                          Uri.parse("package:" + packageName)
-                                      )
-                                      startActivity(intent)
-                                      result.success(false)
-                                  } else {
-                                      result.success(true)
-                                  }
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "installApk" -> {
+                              val path = call.argument<String>("path")
+                              if (path.isNullOrBlank()) {
+                                  result.error("INVALID_PATH", "APK path is missing", null)
+                                  return@setMethodCallHandler
                               }
-                              else -> result.notImplemented()
+                              try {
+                                  val file = File(path)
+                                  if (!file.exists() || !file.isFile || file.length() <= 0) {
+                                      result.error("APK_NOT_FOUND", "APK file does not exist: $path", null)
+                                      return@setMethodCallHandler
+                                  }
+                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                                      val permissionIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                                      startActivity(permissionIntent)
+                                      result.success("permission_required")
+                                      return@setMethodCallHandler
+                                  }
+                                  val uri = FileProvider.getUriForFile(this, "$packageName.fileProvider", file)
+                                  val intent = Intent(Intent.ACTION_VIEW).apply {
+                                      setDataAndType(uri, "application/vnd.android.package-archive")
+                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                      addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                                  }
+                                  startActivity(intent)
+                                  result.success("installer_started")
+                              } catch (e: Exception) {
+                                  result.error("INSTALLER_ERROR", e.message ?: e.javaClass.simpleName, null)
+                              }
                           }
+                          else -> result.notImplemented()
                       }
+                  }
               }
           }
           KOTLIN
           sed -i "s/__NAMESPACE__/$namespace/" "$package_path/MainActivity.kt"
-          echo "Android installer permission bridge configured for namespace: $namespace"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("lib/services/app_update_service.dart")
+          text = path.read_text()
+          text = text.replace("import 'package:flutter_app_installer/flutter_app_installer.dart';\n", "import 'package:flutter/services.dart';\n")
+          old = "await FlutterAppInstaller().installApk(filePath: apkPath);"
+          new = """const installerChannel = MethodChannel('pips_miner/update_installer');
+          final status = await installerChannel.invokeMethod<String>('installApk', {'path': apkPath});
+          if (status == 'permission_required' && context.mounted) {
+            await _showMessage(context, 'Allow installation', 'Android opened the installation permission settings. Allow Pips Miner to install apps, then return to Pips Miner and start the update again.');
+          }"""
+          if old not in text:
+              raise SystemExit('ERROR: expected FlutterAppInstaller call not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
 
       - name: Remove generated widget test
         run: rm -f test/widget_test.dart
