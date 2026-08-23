@@ -113,19 +113,26 @@ jobs:
           val signingPropertiesFile = rootProject.file(\"key.properties\")
           if (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))
           """
-          if "signingPropertiesFile" not in text: text = imports + text
-          if "signingConfigs {" not in text:
-              text = text.replace("android {", """android {
-              signingConfigs {
-                  create(\"release\") {
-                      keyAlias = signingProperties.getProperty(\"keyAlias\")
-                      keyPassword = signingProperties.getProperty(\"keyPassword\")
-                      storeFile = signingProperties.getProperty(\"storeFile\")?.let { rootProject.file(it) }
-                      storePassword = signingProperties.getProperty(\"storePassword\")
-                  }
-              }""", 1)
-          if 'signingConfig = signingConfigs.getByName("release")' not in text:
-              text = text.replace("release {", "release {\n            signingConfig = signingConfigs.getByName(\"release\")", 1)
+          if "signingPropertiesFile" not in text:
+              text = imports + text
+
+          # Use a dedicated signing config name so Flutter's generated debug/release
+          # signing configuration can never be selected accidentally.
+          if "pipsMinerRelease" not in text:
+              signing_block = '''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
+              text = text.replace("android {", "android {" + signing_block, 1)
+
+          # Bind the release build type explicitly to the dedicated release key.
+          if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
+              build_types = text.find("buildTypes {")
+              if build_types < 0:
+                  raise SystemExit("ERROR: buildTypes block not found")
+              release = text.find("release {", build_types)
+              if release < 0:
+                  raise SystemExit("ERROR: release build type not found")
+              insert_at = release + len("release {")
+              text = text[:insert_at] + '\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")' + text[insert_at:]
+
           text = text.rstrip() + """
 
           dependencies {
@@ -261,9 +268,30 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
 
-      - name: Verify APK signing certificate
-        working-directory: .
-        run: $ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner verify --print-certs mobile_app/build/app/outputs/flutter-apk/app-release.apk
+      - name: Verify APK signing certificate matches release keystore
+        run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
+          APK="mobile_app/build/app/outputs/flutter-apk/app-release.apk"
+          KEYSTORE="mobile_app/android/app/Pips-Miner-release.jks"
+
+          expected="$(keytool -list -v -keystore "$KEYSTORE" -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" 2>/dev/null | awk -F': ' '/SHA256:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+          actual="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+
+          if [ -z "$expected" ] || [ -z "$actual" ]; then
+            echo "ERROR: Could not determine signing certificate fingerprint."
+            exit 1
+          fi
+
+          echo "Release keystore certificate fingerprint: $expected"
+          echo "Built APK certificate fingerprint:       $actual"
+
+          if [ "$expected" != "$actual" ]; then
+            echo "ERROR: RELEASE APK IS NOT SIGNED WITH THE CONFIGURED PIPS MINER RELEASE KEY."
+            exit 1
+          fi
+
+          echo "Signing verification passed: APK certificate matches release keystore."
 
       - name: Prepare release APK
         working-directory: .
