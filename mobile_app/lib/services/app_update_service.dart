@@ -38,7 +38,10 @@ class AppUpdateService {
     followRedirects: true,
     maxRedirects: 8,
     validateStatus: (status) => status != null && status >= 200 && status < 300,
-    headers: const {'Accept': 'application/atom+xml, application/xml, text/xml, */*', 'User-Agent': 'Pips-Miner-App'},
+    headers: const {
+      'Accept': 'application/atom+xml, application/xml, text/xml, */*',
+      'User-Agent': 'Pips-Miner-App',
+    },
   ));
 
   Future<AppUpdateInfo?> checkForUpdate() async => (await checkForUpdateDetailed()).update;
@@ -104,20 +107,8 @@ class AppUpdateService {
 
     if (!context.mounted || apkPath == null) return result;
 
-    final install = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Update downloaded'),
-        content: Text('Version ${update.version} has been downloaded to this device.\n\nPress Update app to install it.'),
-        actions: [
-          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Update app')),
-        ],
-      ),
-    );
-
-    if (install != true || !context.mounted) return result;
-
+    // The APK is verified and stored locally before this point. Installation
+    // starts automatically as soon as the download-progress dialog closes.
     try {
       await FlutterAppInstaller().installApk(filePath: apkPath);
     } catch (error) {
@@ -151,6 +142,7 @@ class AppUpdateService {
     if (await apkFile.exists()) await apkFile.delete();
 
     _downloadProgressNotifier.value = const DownloadProgress(received: 0, total: -1);
+    _lastProgressUpdate = null;
     final downloadFuture = _dio.download(
       update.downloadUrl,
       tempPath,
@@ -159,12 +151,17 @@ class AppUpdateService {
         headers: const {
           'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
           'User-Agent': 'Pips-Miner-App',
-          'Accept-Encoding': 'identity',
         },
         responseType: ResponseType.bytes,
       ),
       onReceiveProgress: (received, total) {
-        if (context.mounted) _downloadProgressNotifier.value = DownloadProgress(received: received, total: total);
+        // Throttle UI updates so progress rendering does not compete with the
+        // network stream on slower Android devices.
+        final now = DateTime.now();
+        if (_lastProgressUpdate == null || now.difference(_lastProgressUpdate!) >= const Duration(milliseconds: 250) || (total > 0 && received >= total)) {
+          _lastProgressUpdate = now;
+          if (context.mounted) _downloadProgressNotifier.value = DownloadProgress(received: received, total: total);
+        }
       },
     );
 
@@ -189,6 +186,7 @@ class AppUpdateService {
   }
 
   final ValueNotifier<DownloadProgress> _downloadProgressNotifier = ValueNotifier(const DownloadProgress(received: 0, total: -1));
+  DateTime? _lastProgressUpdate;
 
   Future<void> _showDownloadProgress(BuildContext context, AppUpdateInfo update, Future<Response> downloadFuture) async {
     final dialogReady = Completer<void>();
@@ -220,7 +218,7 @@ class AppUpdateService {
                     const SizedBox(height: 10),
                     Text('$percentText  •  $receivedText$totalText'),
                     const SizedBox(height: 6),
-                    const Text('Please keep Pips-Miner open until the download is complete.'),
+                    const Text('Downloading update… installation will start automatically when complete.'),
                   ],
                 );
               },
