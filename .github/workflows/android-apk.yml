@@ -104,6 +104,29 @@ jobs:
           gradle = Path("android/app/build.gradle.kts")
           text = gradle.read_text()
           text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
+
+          # Keep the Android namespace and application ID permanently identical.
+          # This is the package identity used by every Pips Miner release.
+          text = re.sub(
+              r'(?m)^(\s*)namespace\s*=\s*"[^"]+"',
+              r'\1namespace = "com.example.pips_miner"',
+              text,
+              count=1,
+          )
+          if 'applicationId = "com.example.pips_miner"' not in text:
+              default_config = text.find("defaultConfig {")
+              if default_config < 0:
+                  raise SystemExit("ERROR: defaultConfig block not found")
+              insert_at = text.find("\n", default_config) + 1
+              text = text[:insert_at] + '        applicationId = "com.example.pips_miner"\n' + text[insert_at:]
+          else:
+              text = re.sub(
+                  r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"',
+                  r'\1applicationId = "com.example.pips_miner"',
+                  text,
+                  count=1,
+              )
+
           if "isCoreLibraryDesugaringEnabled = true" not in text:
               text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
           text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
@@ -116,13 +139,10 @@ jobs:
           if "signingPropertiesFile" not in text:
               text = imports + text
 
-          # Use a dedicated signing config name so Flutter's generated debug/release
-          # signing configuration can never be selected accidentally.
           if "pipsMinerRelease" not in text:
               signing_block = '''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
               text = text.replace("android {", "android {" + signing_block, 1)
 
-          # Bind the release build type explicitly to the dedicated release key.
           if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
               build_types = text.find("buildTypes {")
               if build_types < 0:
@@ -174,8 +194,7 @@ jobs:
           manifest.write_text(text)
           PY
 
-          namespace=$(sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)
-          test -n "$namespace"
+          namespace="com.example.pips_miner"
           package_path="android/app/src/main/kotlin/${namespace//./\/}"
           mkdir -p "$package_path"
           cat > "$package_path/MainActivity.kt" <<'KOTLIN'
@@ -265,33 +284,59 @@ jobs:
       - name: Analyze Flutter project
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
+      - name: Verify Android package identity before build
+        run: |
+          set -euo pipefail
+          PACKAGE_ID="com.example.pips_miner"
+          namespace=$(sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -1)
+          application_id=$(sed -n 's/^[[:space:]]*applicationId[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -1)
+          echo "Expected package:     $PACKAGE_ID"
+          echo "Android namespace:    $namespace"
+          echo "Android applicationId: $application_id"
+          test "$namespace" = "$PACKAGE_ID"
+          test "$application_id" = "$PACKAGE_ID"
+          echo "Package identity verification passed."
+
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
 
-      - name: Verify APK signing certificate matches release keystore
+      - name: Verify APK package and signing certificate
+        env:
+          PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
+          PIPS_MINER_KEY_ALIAS: ${{ secrets.PIPS_MINER_KEY_ALIAS }}
+          PIPS_MINER_KEYSTORE_PASSWORD: ${{ secrets.PIPS_MINER_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
           APKSIGNER="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner"
           APK="mobile_app/build/app/outputs/flutter-apk/app-release.apk"
           KEYSTORE="mobile_app/android/app/Pips-Miner-release.jks"
+          EXPECTED_PACKAGE="com.example.pips_miner"
+
+          actual_package="$(aapt dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)"
+          if [ "$actual_package" != "$EXPECTED_PACKAGE" ]; then
+            echo "ERROR: APK package is '$actual_package', expected '$EXPECTED_PACKAGE'."
+            exit 1
+          fi
 
           expected="$(keytool -list -v -keystore "$KEYSTORE" -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" 2>/dev/null | awk -F': ' '/SHA256:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-          actual="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+          actual="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | awk -F': ' '/certificate SHA-256 digest:/{print $2; exit}' | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
 
           if [ -z "$expected" ] || [ -z "$actual" ]; then
             echo "ERROR: Could not determine signing certificate fingerprint."
             exit 1
           fi
 
+          echo "Expected package:                         $EXPECTED_PACKAGE"
+          echo "Built APK package:                        $actual_package"
           echo "Release keystore certificate fingerprint: $expected"
-          echo "Built APK certificate fingerprint:       $actual"
+          echo "Built APK certificate fingerprint:        $actual"
 
           if [ "$expected" != "$actual" ]; then
             echo "ERROR: RELEASE APK IS NOT SIGNED WITH THE CONFIGURED PIPS MINER RELEASE KEY."
             exit 1
           fi
 
-          echo "Signing verification passed: APK certificate matches release keystore."
+          echo "Release verification passed: package and signing certificate are correct."
 
       - name: Prepare release APK
         working-directory: .
