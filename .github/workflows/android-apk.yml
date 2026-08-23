@@ -20,31 +20,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Match settings header to dashboard
+      - name: Update settings header branding
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           path = Path("lib/screens/settings_screen.dart")
           text = path.read_text()
-          old = '''                Text(
-                  'Pips-Miner',
-                  style: TextStyle(
-                    fontSize: 23,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.6,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'ENGINE SETTINGS',
-                  style: TextStyle(
-                    fontSize: 8.5,
-                    letterSpacing: 1.25,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white38,
-                  ),
-                ),'''
-          new = '''                Text(
+          pattern = r"Text\(\s*'Pips-Miner',\s*style: TextStyle\(.*?\),\s*\),\s*SizedBox\(height: 2\),\s*Text\(\s*'ENGINE SETTINGS',\s*style: TextStyle\(.*?\),\s*\),"
+          replacement = """Text(
                   'Pips-Miner',
                   style: TextStyle(
                     fontSize: 18,
@@ -56,15 +40,17 @@ jobs:
                 Text(
                   'life changing pips',
                   style: TextStyle(
-                    color: Colors.white38,
+                    color: Color(0xFFFFD54F),
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     letterSpacing: .8,
                   ),
-                ),'''
-          if old not in text:
-              raise SystemExit("ERROR: settings header block not found; refusing to build")
-          path.write_text(text.replace(old, new, 1))
+                ),"""
+          updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)
+          if count != 1:
+              raise SystemExit("ERROR: Could not locate settings header for branding update")
+          path.write_text(updated)
+          print("Settings header updated: Pips-Miner / life changing pips (gold)")
           PY
 
       - name: Set up Java
