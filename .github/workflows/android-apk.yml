@@ -15,6 +15,7 @@ jobs:
     defaults:
       run:
         working-directory: mobile_app
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,9 +36,11 @@ jobs:
           if "'ENGINE SETTINGS'" in header:
               header = header.replace("'ENGINE SETTINGS'", "'life changing pips'", 1)
               header = header.replace("color: Colors.white38,", "color: AppTheme.accentColor,", 1)
-              path.write_text(text[:start] + header + text[end:])
+              text = text[:start] + header + text[end:]
+              path.write_text(text)
           elif "'life changing pips'" not in header:
               raise SystemExit("ERROR: settings motto not found")
+          print("Settings header verified: Pips-Miner / life changing pips (gold)")
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -71,6 +74,7 @@ jobs:
           if count != 1:
               raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
+          print(f"Unified Pips Miner version: 1.0.{run_number}")
           PY
 
       - name: Generate Android platform
@@ -84,56 +88,69 @@ jobs:
           PIPS_MINER_KEY_PASSWORD: ${{ secrets.PIPS_MINER_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
           if [ -z "$PIPS_MINER_KEYSTORE_BASE64" ] || [ -z "$PIPS_MINER_KEY_ALIAS" ] || [ -z "$PIPS_MINER_KEYSTORE_PASSWORD" ] || [ -z "$PIPS_MINER_KEY_PASSWORD" ]; then
             echo "ERROR: One or more Pips Miner signing secrets are missing."
             exit 1
           fi
+
           printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/Pips-Miner-release.jks
+
           if ! keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
             echo "ERROR: Decoded keystore is invalid, incomplete, or the keystore password/alias is wrong."
             exit 1
           fi
+          echo "Pips Miner signing keystore validated successfully."
+
           cat > android/key.properties <<EOF
           storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
           keyPassword=$PIPS_MINER_KEY_PASSWORD
           keyAlias=$PIPS_MINER_KEY_ALIAS
           storeFile=app/Pips-Miner-release.jks
           EOF
+
           python3 - <<'PY'
           from pathlib import Path
           import re
           gradle = Path("android/app/build.gradle.kts")
           if not gradle.exists():
               raise SystemExit("ERROR: Android app Gradle file not found")
-          text = gradle.read_text().replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
+          text = gradle.read_text()
+          text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
           if "isCoreLibraryDesugaringEnabled = true" not in text:
               if "compileOptions {" not in text:
                   raise SystemExit("ERROR: compileOptions block not found")
               text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
           text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
-          imports = '''import java.util.Properties
+          imports = """import java.util.Properties
           import java.io.FileInputStream
           val signingProperties = Properties()
-          val signingPropertiesFile = rootProject.file("key.properties")
+          val signingPropertiesFile = rootProject.file(\"key.properties\")
           if (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))
-          '''
+          """
           if "signingPropertiesFile" not in text:
               text = imports + text
           if "signingConfigs {" not in text:
-              text = text.replace("android {", '''android {
+              text = text.replace("android {", """android {
               signingConfigs {
-                  create("release") {
-                      keyAlias = signingProperties.getProperty("keyAlias")
-                      keyPassword = signingProperties.getProperty("keyPassword")
-                      storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }
-                      storePassword = signingProperties.getProperty("storePassword")
+                  create(\"release\") {
+                      keyAlias = signingProperties.getProperty(\"keyAlias\")
+                      keyPassword = signingProperties.getProperty(\"keyPassword\")
+                      storeFile = signingProperties.getProperty(\"storeFile\")?.let { rootProject.file(it) }
+                      storePassword = signingProperties.getProperty(\"storePassword\")
                   }
-              }''', 1)
+              }""", 1)
           if 'signingConfig = signingConfigs.getByName("release")' not in text:
-              text = text.replace("release {", 'release {\n            signingConfig = signingConfigs.getByName("release")', 1)
-          text = text.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n'
+              text = text.replace("release {", "release {\n            signingConfig = signingConfigs.getByName(\"release\")", 1)
+          text = text.rstrip() + """
+
+          dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+          }
+          """
           gradle.write_text(text)
           PY
+
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/file_paths.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -146,9 +163,9 @@ jobs:
               <root-path name="root" path="." />
           </paths>
           XML
+
           python3 - <<'PY'
           from pathlib import Path
-          import re
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text()
           if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
@@ -177,51 +194,53 @@ jobs:
           text = text.replace('android:label="pips_miner"', 'android:label="Pips Miner"')
           text = text.replace('android:label="pips_miner_app"', 'android:label="Pips Miner"')
           manifest.write_text(text)
-
-          gradle_text = Path("android/app/build.gradle.kts").read_text()
-          namespace_match = re.search(r'namespace\s*=\s*"([^"]+)"', gradle_text)
-          if not namespace_match:
-              raise SystemExit("ERROR: Android namespace not found")
-          namespace = namespace_match.group(1)
-          package_path = Path("android/app/src/main/kotlin") / Path(namespace.replace('.', '/'))
-          package_path.mkdir(parents=True, exist_ok=True)
-          main_activity = package_path / "MainActivity.kt"
-          kotlin = """package __NAMESPACE__
-
-import android.content.Intent
-import android.net.Uri
-import android.os.Build
-import android.provider.Settings
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
-
-class MainActivity : FlutterActivity() {
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pips_miner/update_installer")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "prepareInstaller" -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-                            val intent = Intent(
-                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                Uri.parse("package:" + packageName)
-                            )
-                            startActivity(intent)
-                            result.success(false)
-                        } else {
-                            result.success(true)
-                        }
-                    }
-                    else -> result.notImplemented()
-                }
-            }
-    }
-}
-""".replace("__NAMESPACE__", namespace)
-          main_activity.write_text(kotlin)
           PY
+
+          gradle_text=$(cat android/app/build.gradle.kts)
+          namespace=$(printf '%s\n' "$gradle_text" | sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+          if [ -z "$namespace" ]; then
+            echo "ERROR: Android namespace not found"
+            exit 1
+          fi
+          package_path="android/app/src/main/kotlin/${namespace//./\/}"
+          mkdir -p "$package_path"
+          cat > "$package_path/MainActivity.kt" <<'KOTLIN'
+          package __NAMESPACE__
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.provider.Settings
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+
+          class MainActivity : FlutterActivity() {
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pips_miner/update_installer")
+                      .setMethodCallHandler { call, result ->
+                          when (call.method) {
+                              "prepareInstaller" -> {
+                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                                      val intent = Intent(
+                                          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                          Uri.parse("package:" + packageName)
+                                      )
+                                      startActivity(intent)
+                                      result.success(false)
+                                  } else {
+                                      result.success(true)
+                                  }
+                              }
+                              else -> result.notImplemented()
+                          }
+                      }
+              }
+          }
+          KOTLIN
+          sed -i "s/__NAMESPACE__/$namespace/" "$package_path/MainActivity.kt"
+          echo "Android installer permission bridge configured for namespace: $namespace"
 
       - name: Remove generated widget test
         run: rm -f test/widget_test.dart
