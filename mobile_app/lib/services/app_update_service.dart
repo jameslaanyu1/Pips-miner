@@ -52,8 +52,11 @@ class AppUpdateService {
 
   final Dio _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 8),
-      receiveTimeout: const Duration(seconds: 60),
+      // GitHub can take longer than 8 seconds to establish a connection on
+      // slower mobile networks. Allow a 20-second connection window while
+      // keeping the response timeout bounded.
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(seconds: 90),
       followRedirects: true,
       validateStatus: (status) => status != null && status >= 200 && status < 300,
       headers: const {
