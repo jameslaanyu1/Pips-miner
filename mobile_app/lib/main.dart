@@ -8,11 +8,13 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/app_update_service.dart';
 import 'services/background_execution_service.dart';
+import 'services/pips_notification_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializePipsMinerBackgroundService();
+  await PipsNotificationService.instance.initialize();
   runApp(const PipsMinerApp());
 }
 
@@ -47,6 +49,11 @@ class _MainScreenState extends State<MainScreen> {
   Timer? _updateTimer;
   bool _updatePromptOpen = false;
   bool _initialUpdateCheckReported = false;
+  BotProvider? _bot;
+  bool _wasConnected = false;
+  bool _wasBotRunning = false;
+  bool _wasLiveAccount = false;
+  String? _lastConnectionError;
 
   final List<Widget> _screens = const [
     HomeScreen(),
@@ -56,11 +63,57 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bot = context.read<BotProvider>();
+      _bot = bot;
+      _wasConnected = bot.isConnected;
+      _wasBotRunning = bot.isBotRunning;
+      _wasLiveAccount = bot.isLiveAccount;
+      _lastConnectionError = bot.connectionError;
+      bot.addListener(_handleBotEvents);
+      _checkForUpdate();
+    });
     _updateTimer = Timer.periodic(
       const Duration(minutes: 10),
       (_) => _checkForUpdate(),
     );
+  }
+
+  void _handleBotEvents() {
+    if (!mounted) return;
+    final bot = _bot;
+    if (bot == null) return;
+
+    if (!_wasConnected && bot.isConnected) {
+      unawaited(PipsNotificationService.instance.mt5Connected());
+    }
+
+    final error = bot.connectionError;
+    if (!_wasConnected && !_lastConnectionErrorEquals(error)) {
+      if (error != null && error.isNotEmpty && !bot.isConnected) {
+        unawaited(PipsNotificationService.instance.mt5ConnectionFailed(error));
+      }
+    }
+
+    if (!_wasBotRunning && bot.isBotRunning) {
+      unawaited(PipsNotificationService.instance.botStarted());
+    } else if (_wasBotRunning && !bot.isBotRunning && bot.engineError == null) {
+      unawaited(PipsNotificationService.instance.botStopped());
+    }
+
+    if (_wasLiveAccount != bot.isLiveAccount) {
+      unawaited(PipsNotificationService.instance.accountModeChanged(bot.accountMode));
+    }
+
+    _wasConnected = bot.isConnected;
+    _wasBotRunning = bot.isBotRunning;
+    _wasLiveAccount = bot.isLiveAccount;
+    _lastConnectionError = error;
+  }
+
+  bool _lastConnectionErrorEquals(String? error) {
+    return error == _lastConnectionError;
   }
 
   Future<void> _checkForUpdate() async {
@@ -69,9 +122,6 @@ class _MainScreenState extends State<MainScreen> {
     try {
       final result = await AppUpdateService.instance.promptIfUpdateAvailable(context);
 
-      // The first automatic check reports its exact decision once. This makes
-      // update failures/version mismatches visible instead of silently hiding
-      // them, while keeping subsequent background checks quiet.
       if (!_initialUpdateCheckReported && mounted &&
           result.status != UpdateCheckStatus.updateAvailable) {
         _initialUpdateCheckReported = true;
@@ -92,6 +142,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     _updateTimer?.cancel();
+    _bot?.removeListener(_handleBotEvents);
     super.dispose();
   }
 
