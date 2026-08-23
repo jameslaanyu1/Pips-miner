@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+# Every main-branch update must produce a fresh APK and latest GitHub release.
+# This also provides a simple trigger point for the automatic in-app updater.
+
 jobs:
   build-release-apk:
     runs-on: ubuntu-latest
@@ -72,15 +75,8 @@ jobs:
               raise SystemExit("ERROR: Android app Gradle file not found")
 
           text = gradle.read_text()
+          text = text.replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
 
-          # Pin the compile SDK used by the release build.
-          text = text.replace(
-              "compileSdk = flutter.compileSdkVersion",
-              "compileSdk = 36",
-              1,
-          )
-
-          # Enable Java 17/core-library desugaring in the Android app module.
           if "isCoreLibraryDesugaringEnabled = true" not in text:
               if "compileOptions {" not in text:
                   raise SystemExit("ERROR: compileOptions block not found in Android Gradle file")
@@ -90,18 +86,8 @@ jobs:
                   1,
               )
 
-          # Remove any previous coreLibraryDesugaring dependency line, then
-          # append a dedicated dependencies block. Multiple Gradle dependency
-          # blocks are valid and this avoids accidentally inserting the
-          # dependency into an unrelated generated block.
-          text = re.sub(
-              r"^\s*coreLibraryDesugaring\(.*\)\s*$",
-              "",
-              text,
-              flags=re.MULTILINE,
-          )
+          text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
           text = text.rstrip() + "\n\ndependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n}\n"
-
           gradle.write_text(text)
           PY
 
@@ -127,8 +113,7 @@ jobs:
           if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
               text = text.replace(
                   'xmlns:android="http://schemas.android.com/apk/res/android"',
-                  'xmlns:android="http://schemas.android.com/apk/res/android" '
-                  'xmlns:tools="http://schemas.android.com/tools"',
+                  'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"',
                   1,
               )
 
