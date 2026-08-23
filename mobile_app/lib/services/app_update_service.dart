@@ -43,15 +43,18 @@ class AppUpdateService {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
       final response = await _dio.get<Map<String, dynamic>>(_latestReleaseUrl);
+      final data = response.data;
+      if (data == null) return null;
 
-      if (response.data == null) return null;
+      // Release tags are deliberately unique CI identifiers and are NOT the
+      // application version. The release title carries the actual app version.
+      final releaseName = data['name']?.toString() ?? '';
+      final versionMatch = RegExp(r'Pips Miner v(\d+(?:\.\d+)+)').firstMatch(releaseName);
+      final remoteVersion = versionMatch?.group(1) ?? '';
+      final releaseUrl = data['html_url']?.toString() ?? '';
 
-      final tag = response.data!['tag_name']?.toString() ?? '';
-      final remoteVersion = tag.startsWith('v') ? tag.substring(1) : tag;
-      final releaseUrl = response.data!['html_url']?.toString() ?? '';
-
-      final assets = response.data!['assets'];
-      if (assets is! List) return null;
+      final assets = data['assets'];
+      if (assets is! List || remoteVersion.isEmpty) return null;
 
       String? apkUrl;
       for (final asset in assets) {
@@ -62,7 +65,7 @@ class AppUpdateService {
         }
       }
 
-      if (apkUrl == null || remoteVersion.isEmpty) return null;
+      if (apkUrl == null || apkUrl.isEmpty) return null;
 
       if (_compareVersions(remoteVersion, packageInfo.version) <= 0) {
         return null;
@@ -135,7 +138,6 @@ class AppUpdateService {
     final apkPath = '${directory.path}/Pips-Miner-${update.version}.apk';
     final file = File(apkPath);
 
-    // Never reuse a partially downloaded or corrupted APK from a previous attempt.
     if (await file.exists()) {
       await file.delete();
     }
@@ -168,7 +170,6 @@ class AppUpdateService {
       throw StateError('Downloaded APK is unexpectedly small.');
     }
 
-    // An APK is a ZIP-based package and must begin with the ZIP signature.
     final bytes = await file.openRead(0, 4).fold<List<int>>(
       <int>[],
       (previous, chunk) => previous..addAll(chunk),
