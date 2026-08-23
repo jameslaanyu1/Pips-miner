@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -27,7 +26,11 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const _releasesFeedUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases.atom';
+  // Use GitHub's public REST API for release discovery instead of the Atom
+  // feed. This gives us a structured response and avoids relying on feed
+  // parsing/redirect behavior on Android. GitHub documents this endpoint as
+  // the public "Get the latest release" endpoint.
+  static const _latestReleaseApiUrl = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest';
   static const _latestReleaseUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
   static const _latestApkUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
 
@@ -38,13 +41,14 @@ class AppUpdateService {
   Future<UpdateCheckResult> checkForUpdateDetailed() async {
     final installedVersion = (await PackageInfo.fromPlatform()).version;
     try {
-      final feed = await _feedClient.get(_releasesFeedUrl);
-      if (feed.trim().isEmpty) {
-        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub returned an empty releases feed.');
+      final response = await _feedClient.get(_latestReleaseApiUrl);
+      if (response.trim().isEmpty) {
+        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub returned an empty release response.');
       }
-      final latestRelease = _parseLatestRelease(feed);
+
+      final latestRelease = _parseLatestRelease(response);
       if (latestRelease == null) {
-        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub releases feed did not contain a compatible Pips Miner version.');
+        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub did not return a compatible Pips Miner release.');
       }
       if (_compareVersions(latestRelease.version, installedVersion) <= 0) {
         return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest published release is ${latestRelease.version}.');
@@ -55,14 +59,17 @@ class AppUpdateService {
     }
   }
 
-  AppUpdateInfo? _parseLatestRelease(String feed) {
-    final entryMatch = RegExp(r'<entry\b[^>]*>([\s\S]*?)</entry>', caseSensitive: false).firstMatch(feed);
-    if (entryMatch == null) return null;
-    final entry = entryMatch.group(1)!;
-    final titleMatch = RegExp(r'<title\b[^>]*>\s*(?:Pips\s+Miner\s+)?v?(\d+(?:\.\d+)+)\s*</title>', caseSensitive: false).firstMatch(entry);
-    if (titleMatch == null) return null;
-    final version = titleMatch.group(1)!;
-    return AppUpdateInfo(version: version, downloadUrl: _latestApkUrl, releaseUrl: _latestReleaseUrl);
+  AppUpdateInfo? _parseLatestRelease(String response) {
+    try {
+      final data = jsonDecode(response);
+      if (data is! Map<String, dynamic>) return null;
+      final tag = data['tag_name']?.toString() ?? '';
+      final versionMatch = RegExp(r'\d+(?:\.\d+)+').firstMatch(tag);
+      if (versionMatch == null) return null;
+      return AppUpdateInfo(version: versionMatch.group(0)!, downloadUrl: _latestApkUrl, releaseUrl: _latestReleaseUrl);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<UpdateCheckResult> promptIfUpdateAvailable(BuildContext context) async {
@@ -123,15 +130,20 @@ class AppUpdateService {
   }
 }
 
-/// Small abstraction used only for the release-feed request so the updater's
-/// public behavior remains unchanged while Chrome owns the APK download.
+/// Small abstraction used only for the release-discovery request so the
+/// updater's public behavior remains unchanged while Chrome owns the APK download.
 class DioLike {
   Future<String> get(String url) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(Uri.parse(url));
       request.headers.set('User-Agent', 'Pips-Miner-App');
+      request.headers.set('Accept', 'application/vnd.github+json');
+      request.headers.set('X-GitHub-Api-Version', '2026-03-10');
       final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('GitHub release API returned HTTP ${response.statusCode}.');
+      }
       return await response.transform(utf8.decoder).join();
     } finally {
       client.close(force: true);
