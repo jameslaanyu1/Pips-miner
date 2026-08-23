@@ -39,8 +39,16 @@ class AppUpdateService {
 
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const _releasesUrl =
-      'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases?per_page=20';
+  // Do not use the GitHub REST releases API here. Unauthenticated mobile
+  // clients can hit GitHub's API rate limit and receive HTTP 403. The public
+  // releases Atom feed is not subject to that API limit and contains the
+  // published release title/version we need for update detection.
+  static const _releasesFeedUrl =
+      'https://github.com/jameslaanyu1/Pips-miner/releases.atom';
+  static const _latestReleaseUrl =
+      'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
+  static const _latestApkUrl =
+      'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
 
   final Dio _dio = Dio(
     BaseOptions(
@@ -49,7 +57,7 @@ class AppUpdateService {
       followRedirects: true,
       validateStatus: (status) => status != null && status >= 200 && status < 300,
       headers: const {
-        'Accept': 'application/vnd.github+json',
+        'Accept': 'application/atom+xml, application/xml, text/xml, */*',
         'User-Agent': 'Pips-Miner-App',
       },
     ),
@@ -65,82 +73,38 @@ class AppUpdateService {
     final installedVersion = packageInfo.version;
 
     try {
-      final response = await _dio.get<List<dynamic>>(_releasesUrl);
-      final releases = response.data;
-      if (releases == null) {
+      final response = await _dio.get<String>(_releasesFeedUrl);
+      final feed = response.data;
+      if (feed == null || feed.trim().isEmpty) {
         return UpdateCheckResult(
           status: UpdateCheckStatus.failed,
           installedVersion: installedVersion,
-          message: 'GitHub returned an empty releases response.',
+          message: 'GitHub returned an empty releases feed.',
         );
       }
 
-      AppUpdateInfo? newestUpdate;
-      var publishedReleaseCount = 0;
-      var compatibleReleaseCount = 0;
-      var apkAssetCount = 0;
-      String? newestRemoteVersion;
-
-      for (final release in releases) {
-        if (release is! Map<String, dynamic>) continue;
-        if (release['draft'] == true || release['prerelease'] == true) continue;
-        publishedReleaseCount++;
-
-        final releaseName = release['name']?.toString() ?? '';
-        final releaseTag = release['tag_name']?.toString() ?? '';
-        final remoteVersion = _extractVersion(releaseName, releaseTag);
-        if (remoteVersion == null) continue;
-        compatibleReleaseCount++;
-
-        if (newestRemoteVersion == null ||
-            _compareVersions(remoteVersion, newestRemoteVersion) > 0) {
-          newestRemoteVersion = remoteVersion;
-        }
-
-        final assets = release['assets'];
-        if (assets is! List) continue;
-
-        String? apkUrl;
-        for (final asset in assets) {
-          if (asset is Map<String, dynamic> &&
-              asset['name']?.toString() == 'Pips-Miner-release.apk') {
-            apkAssetCount++;
-            apkUrl = asset['browser_download_url']?.toString();
-            break;
-          }
-        }
-        if (apkUrl == null || apkUrl.isEmpty) continue;
-
-        final releaseUrl = release['html_url']?.toString() ?? '';
-        final candidate = AppUpdateInfo(
-          version: remoteVersion,
-          downloadUrl: apkUrl,
-          releaseUrl: releaseUrl,
-        );
-
-        if (_compareVersions(candidate.version, installedVersion) <= 0) {
-          continue;
-        }
-
-        if (newestUpdate == null ||
-            _compareVersions(candidate.version, newestUpdate.version) > 0) {
-          newestUpdate = candidate;
-        }
-      }
-
-      if (newestUpdate != null) {
+      final latestRelease = _parseLatestRelease(feed);
+      if (latestRelease == null) {
         return UpdateCheckResult(
-          status: UpdateCheckStatus.updateAvailable,
+          status: UpdateCheckStatus.failed,
           installedVersion: installedVersion,
-          update: newestUpdate,
-          message: 'Update ${newestUpdate.version} found. Installed version is $installedVersion.',
+          message: 'GitHub releases feed did not contain a compatible Pips Miner version.',
+        );
+      }
+
+      if (_compareVersions(latestRelease.version, installedVersion) <= 0) {
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.upToDate,
+          installedVersion: installedVersion,
+          message: 'Installed $installedVersion; latest published release is ${latestRelease.version}.',
         );
       }
 
       return UpdateCheckResult(
-        status: UpdateCheckStatus.upToDate,
+        status: UpdateCheckStatus.updateAvailable,
         installedVersion: installedVersion,
-        message: 'Installed $installedVersion; newest compatible release is ${newestRemoteVersion ?? 'none'}; published releases: $publishedReleaseCount; compatible releases: $compatibleReleaseCount; APK assets: $apkAssetCount.',
+        update: latestRelease,
+        message: 'Update ${latestRelease.version} found. Installed version is $installedVersion.',
       );
     } catch (error) {
       return UpdateCheckResult(
@@ -151,20 +115,26 @@ class AppUpdateService {
     }
   }
 
-  String? _extractVersion(String releaseName, String releaseTag) {
-    final patterns = <RegExp>[
-      RegExp(r'Pips Miner v(\d+(?:\.\d+)+)', caseSensitive: false),
-      RegExp(r'^v?(\d+(?:\.\d+)+)$', caseSensitive: false),
-      RegExp(r'v(\d+(?:\.\d+)+)', caseSensitive: false),
-    ];
+  AppUpdateInfo? _parseLatestRelease(String feed) {
+    final entryMatch = RegExp(
+      r'<entry\b[^>]*>([\s\S]*?)</entry>',
+      caseSensitive: false,
+    ).firstMatch(feed);
+    if (entryMatch == null) return null;
 
-    for (final pattern in patterns) {
-      final nameMatch = pattern.firstMatch(releaseName);
-      if (nameMatch != null) return nameMatch.group(1);
-      final tagMatch = pattern.firstMatch(releaseTag);
-      if (tagMatch != null) return tagMatch.group(1);
-    }
-    return null;
+    final entry = entryMatch.group(1)!;
+    final titleMatch = RegExp(
+      r'<title\b[^>]*>\s*(?:Pips\s+Miner\s+)?v?(\d+(?:\.\d+)+)\s*</title>',
+      caseSensitive: false,
+    ).firstMatch(entry);
+    if (titleMatch == null) return null;
+
+    final version = titleMatch.group(1)!;
+    return AppUpdateInfo(
+      version: version,
+      downloadUrl: _latestApkUrl,
+      releaseUrl: _latestReleaseUrl,
+    );
   }
 
   Future<UpdateCheckResult> promptIfUpdateAvailable(BuildContext context) async {
@@ -235,7 +205,7 @@ class AppUpdateService {
       options: Options(
         responseType: ResponseType.bytes,
         headers: const {
-          'Accept': 'application/octet-stream',
+          'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
           'User-Agent': 'Pips-Miner-App',
         },
       ),
