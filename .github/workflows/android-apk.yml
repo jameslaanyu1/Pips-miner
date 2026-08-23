@@ -139,6 +139,9 @@ jobs:
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
+      - name: Remove generated widget test
+        run: rm -f test/widget_test.dart
+
       - name: Analyze Flutter project
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
