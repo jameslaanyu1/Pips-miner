@@ -71,21 +71,21 @@ class HomeScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'PIPS MINER',
+                'Pips-Miner',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 1.5,
+                  letterSpacing: 1.0,
                 ),
               ),
               SizedBox(height: 2),
               Text(
-                'AUTONOMOUS TRADING ENGINE',
+                'life changing pips',
                 style: TextStyle(
                   color: Colors.white38,
                   fontSize: 9,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
+                  letterSpacing: .8,
                 ),
               ),
             ],
