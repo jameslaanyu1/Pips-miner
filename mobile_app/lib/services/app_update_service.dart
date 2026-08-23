@@ -140,7 +140,6 @@ class AppUpdateService {
     if (directory == null) throw StateError('Android external app storage is unavailable.');
     final apkPath = '${directory.path}/Pips-Miner-${update.version}.apk';
     final file = File(apkPath);
-    if (await file.exists()) await file.delete();
 
     await _downloadApkWithResume(update.downloadUrl, file);
 
