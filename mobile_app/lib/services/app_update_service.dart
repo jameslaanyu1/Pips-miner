@@ -73,7 +73,7 @@ class AppUpdateService {
     final titleMatch = RegExp(r'<title\b[^>]*>\s*(?:Pips\s+Miner\s+)?v?(\d+(?:\.\d+)+)\s*</title>', caseSensitive: false).firstMatch(entry);
     if (titleMatch == null) return null;
     final version = titleMatch.group(1)!;
-    return const AppUpdateInfo(version: '', downloadUrl: '', releaseUrl: '');
+    return AppUpdateInfo(version: version, downloadUrl: _latestApkUrl, releaseUrl: _latestReleaseUrl);
   }
 
   Future<UpdateCheckResult> promptIfUpdateAvailable(BuildContext context) async {
@@ -110,9 +110,6 @@ class AppUpdateService {
   }
 
   Future<void> _downloadAndInstall(AppUpdateInfo update) async {
-    // Store the APK in the app-specific external files directory. This is
-    // explicitly covered by the FileProvider path used by the Android build,
-    // unlike a temporary/cache location on some Android versions.
     final directory = await getExternalStorageDirectory();
     if (directory == null) throw StateError('Android external app storage is unavailable.');
     final apkPath = '${directory.path}/Pips-Miner-${update.version}.apk';
