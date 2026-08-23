@@ -18,6 +18,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Update settings header branding
         run: |
           python3 - <<'PY'
@@ -26,39 +27,55 @@ jobs:
           text = path.read_text()
           start = text.find("class _SettingsHeader extends StatelessWidget")
           end = text.find("class _ConnectionSection", start)
-          if start < 0 or end < 0: raise SystemExit("ERROR: _SettingsHeader section not found")
+          if start < 0 or end < 0:
+              raise SystemExit("ERROR: _SettingsHeader section not found")
           header = text[start:end]
-          if "'Pips-Miner'" not in header: raise SystemExit("ERROR: Pips-Miner title not found")
+          if "'Pips-Miner'" not in header:
+              raise SystemExit("ERROR: Pips-Miner title not found")
           if "'ENGINE SETTINGS'" in header:
               header = header.replace("'ENGINE SETTINGS'", "'life changing pips'", 1)
               header = header.replace("color: Colors.white38,", "color: AppTheme.accentColor,", 1)
-              text = text[:start] + header + text[end:]
-              path.write_text(text)
-          elif "'life changing pips'" not in header: raise SystemExit("ERROR: settings motto not found")
-          print("Settings header: Pips-Miner / life changing pips (gold)")
+              path.write_text(text[:start] + header + text[end:])
+          elif "'life changing pips'" not in header:
+              raise SystemExit("ERROR: settings motto not found")
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.7'
           channel: stable
           cache: true
+
       - name: Stamp unified release version
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import os,re
-          path=Path("pubspec.yaml"); text=path.read_text(); run_number=os.environ["GITHUB_RUN_NUMBER"]
-          text,count=re.subn(r"^version:\s*[^\n]+$",f"version: 1.0.{run_number}+{run_number}",text,count=1,flags=re.MULTILINE)
-          if count != 1: raise SystemExit("ERROR: pubspec.yaml version field not found")
+          import os
+          import re
+          path = Path("pubspec.yaml")
+          text = path.read_text()
+          run_number = os.environ["GITHUB_RUN_NUMBER"]
+          text, count = re.subn(
+              r"^version:\s*[^\n]+$",
+              f"version: 1.0.{run_number}+{run_number}",
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if count != 1:
+              raise SystemExit("ERROR: pubspec.yaml version field not found")
           path.write_text(text)
-          print(f"Unified Pips Miner version: 1.0.{run_number}")
+          PY
+
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner .
+
       - name: Configure Android build, signing and update installer
         env:
           PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
@@ -68,13 +85,14 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$PIPS_MINER_KEYSTORE_BASE64" ] || [ -z "$PIPS_MINER_KEY_ALIAS" ] || [ -z "$PIPS_MINER_KEYSTORE_PASSWORD" ] || [ -z "$PIPS_MINER_KEY_PASSWORD" ]; then
-            echo "ERROR: One or more Pips Miner signing secrets are missing."; exit 1
+            echo "ERROR: One or more Pips Miner signing secrets are missing."
+            exit 1
           fi
           printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/Pips-Miner-release.jks
           if ! keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
-            echo "ERROR: Decoded keystore is invalid, incomplete, or the keystore password/alias is wrong."; exit 1
+            echo "ERROR: Decoded keystore is invalid, incomplete, or the keystore password/alias is wrong."
+            exit 1
           fi
-          echo "Pips Miner signing keystore validated successfully."
           cat > android/key.properties <<EOF
           storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
           keyPassword=$PIPS_MINER_KEY_PASSWORD
@@ -84,22 +102,25 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          gradle=Path("android/app/build.gradle.kts")
-          if not gradle.exists(): raise SystemExit("ERROR: Android app Gradle file not found")
-          text=gradle.read_text().replace("compileSdk = flutter.compileSdkVersion","compileSdk = 36",1)
+          gradle = Path("android/app/build.gradle.kts")
+          if not gradle.exists():
+              raise SystemExit("ERROR: Android app Gradle file not found")
+          text = gradle.read_text().replace("compileSdk = flutter.compileSdkVersion", "compileSdk = 36", 1)
           if "isCoreLibraryDesugaringEnabled = true" not in text:
-              if "compileOptions {" not in text: raise SystemExit("ERROR: compileOptions block not found")
-              text=text.replace("compileOptions {","compileOptions {\n        isCoreLibraryDesugaringEnabled = true",1)
-          text=re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$","",text,flags=re.MULTILINE)
-          imports='''import java.util.Properties
+              if "compileOptions {" not in text:
+                  raise SystemExit("ERROR: compileOptions block not found")
+              text = text.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
+          text = re.sub(r"^\s*coreLibraryDesugaring\(.*\)\s*$", "", text, flags=re.MULTILINE)
+          imports = '''import java.util.Properties
           import java.io.FileInputStream
           val signingProperties = Properties()
           val signingPropertiesFile = rootProject.file("key.properties")
           if (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))
           '''
-          if 'signingPropertiesFile' not in text: text=imports+text
-          if 'signingConfigs {' not in text:
-              text=text.replace('android {','''android {
+          if "signingPropertiesFile" not in text:
+              text = imports + text
+          if "signingConfigs {" not in text:
+              text = text.replace("android {", '''android {
               signingConfigs {
                   create("release") {
                       keyAlias = signingProperties.getProperty("keyAlias")
@@ -107,10 +128,10 @@ jobs:
                       storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }
                       storePassword = signingProperties.getProperty("storePassword")
                   }
-              }''',1)
+              }''', 1)
           if 'signingConfig = signingConfigs.getByName("release")' not in text:
-              text=text.replace('release {','release {\n            signingConfig = signingConfigs.getByName("release")',1)
-          text=text.rstrip()+"\n\ndependencies {\n    coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.5\")\n}\n"
+              text = text.replace("release {", 'release {\n            signingConfig = signingConfigs.getByName("release")', 1)
+          text = text.rstrip() + '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n'
           gradle.write_text(text)
           PY
           mkdir -p android/app/src/main/res/xml
@@ -128,12 +149,21 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          manifest=Path("android/app/src/main/AndroidManifest.xml"); text=manifest.read_text()
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
           if 'xmlns:tools="http://schemas.android.com/tools"' not in text:
-              text=text.replace('xmlns:android="http://schemas.android.com/apk/res/android"','xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"',1)
-          for p in ['<uses-permission android:name="android.permission.INTERNET" />','<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />']:
-              if p not in text: text=text.replace("<application",p+"\n    <application",1)
-          provider='''    <provider
+              text = text.replace(
+                  'xmlns:android="http://schemas.android.com/apk/res/android"',
+                  'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"',
+                  1,
+              )
+          for permission in [
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
+          ]:
+              if permission not in text:
+                  text = text.replace("<application", permission + "\n    <application", 1)
+          provider = '''    <provider
               android:name="androidx.core.content.FileProvider"
               android:authorities="${applicationId}.fileProvider"
               android:exported="false"
@@ -142,18 +172,21 @@ jobs:
               <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" tools:replace="android:resource" />
           </provider>
           '''
-          if "${applicationId}.fileProvider" not in text: text=text.replace("</application>",provider+"</application>",1)
-          text=text.replace('android:label="pips_miner"','android:label="Pips Miner"').replace('android:label="pips_miner_app"','android:label="Pips Miner"')
+          if "${applicationId}.fileProvider" not in text:
+              text = text.replace("</application>", provider + "</application>", 1)
+          text = text.replace('android:label="pips_miner"', 'android:label="Pips Miner"')
+          text = text.replace('android:label="pips_miner_app"', 'android:label="Pips Miner"')
           manifest.write_text(text)
 
-          gradle_text=Path("android/app/build.gradle.kts").read_text()
-          namespace_match=re.search(r'namespace\s*=\s*"([^"]+)"', gradle_text)
-          if not namespace_match: raise SystemExit("ERROR: Android namespace not found")
-          namespace=namespace_match.group(1)
-          package_path=Path("android/app/src/main/kotlin") / Path(namespace.replace('.', '/'))
+          gradle_text = Path("android/app/build.gradle.kts").read_text()
+          namespace_match = re.search(r'namespace\s*=\s*"([^"]+)"', gradle_text)
+          if not namespace_match:
+              raise SystemExit("ERROR: Android namespace not found")
+          namespace = namespace_match.group(1)
+          package_path = Path("android/app/src/main/kotlin") / Path(namespace.replace('.', '/'))
           package_path.mkdir(parents=True, exist_ok=True)
-          main_activity=package_path / "MainActivity.kt"
-          main_activity.write_text(f'''package {namespace}
+          main_activity = package_path / "MainActivity.kt"
+          kotlin = """package __NAMESPACE__
 
 import android.content.Intent
 import android.net.Uri
@@ -163,54 +196,63 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {{
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {{
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pips_miner/update_installer")
-            .setMethodCallHandler {{ call, result ->
-                when (call.method) {{
-                    "prepareInstaller" -> {{
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {{
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "prepareInstaller" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
                             val intent = Intent(
                                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                Uri.parse("package:$packageName")
+                                Uri.parse("package:" + packageName)
                             )
                             startActivity(intent)
                             result.success(false)
-                        }} else {{
+                        } else {
                             result.success(true)
-                        }}
-                    }}
+                        }
+                    }
                     else -> result.notImplemented()
-                }}
-            }}
-    }}
-}}
-''')
-          print(f"Android installer permission bridge configured for namespace: {{namespace}}")
+                }
+            }
+    }
+}
+""".replace("__NAMESPACE__", namespace)
+          main_activity.write_text(kotlin)
           PY
+
       - name: Remove generated widget test
         run: rm -f test/widget_test.dart
+
       - name: Install dependencies
         run: flutter pub get
+
       - name: Generate app icons
         run: dart run flutter_launcher_icons
+
       - name: Analyze Flutter project
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
+
       - name: Verify APK signing certificate
         working-directory: .
         run: $ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner verify --print-certs mobile_app/build/app/outputs/flutter-apk/app-release.apk
+
       - name: Prepare release APK
         working-directory: .
         run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Pips-Miner-v1.0.${{ github.run_number }}
           path: Pips-Miner-release.apk
           if-no-files-found: error
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
