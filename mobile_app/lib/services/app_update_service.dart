@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -130,7 +132,7 @@ class DioLike {
       final request = await client.getUrl(Uri.parse(url));
       request.headers.set('User-Agent', 'Pips-Miner-App');
       final response = await request.close();
-      return await response.transform(const SystemEncoding().decoder).join();
+      return await response.transform(utf8.decoder).join();
     } finally {
       client.close(force: true);
     }
