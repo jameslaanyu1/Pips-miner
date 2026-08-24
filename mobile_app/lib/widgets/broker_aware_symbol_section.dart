@@ -32,7 +32,6 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
   bool _loading = false;
   String? _error;
   bool _loadedForCurrentAccount = false;
-  bool _lastConnected = false;
   Timer? _brokerChangeDebounce;
 
   @override
@@ -40,28 +39,32 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
     super.initState();
     widget.brokerController.addListener(_connectionFieldsChanged);
     widget.serverController.addListener(_connectionFieldsChanged);
-    _lastConnected = widget.bot.isConnected;
-    if (_lastConnected) unawaited(_prepareForAccount());
+    widget.bot.addListener(_botChanged);
+    if (widget.bot.isConnected) unawaited(_prepareForAccount());
   }
 
   @override
   void didUpdateWidget(covariant BrokerAwareSymbolSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.bot.isConnected != widget.bot.isConnected) {
-      _lastConnected = widget.bot.isConnected;
-      if (_lastConnected) {
-        unawaited(_prepareForAccount());
-      } else {
-        _loadedForCurrentAccount = false;
-        _brokerSymbols = const [];
-      }
+    if (oldWidget.bot != widget.bot) {
+      oldWidget.bot.removeListener(_botChanged);
+      widget.bot.addListener(_botChanged);
     }
+  }
+
+  void _botChanged() {
+    final connected = widget.bot.isConnected;
+    if (connected && !_loadedForCurrentAccount && !_loading) {
+      unawaited(_prepareForAccount());
+    }
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     widget.brokerController.removeListener(_connectionFieldsChanged);
     widget.serverController.removeListener(_connectionFieldsChanged);
+    widget.bot.removeListener(_botChanged);
     _brokerChangeDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -83,8 +86,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
   String get _server => widget.serverController.text.trim();
 
   Future<void> _prepareForAccount() async {
-    if (!widget.bot.isConnected) return;
-    if (_broker.isEmpty || _server.isEmpty) return;
+    if (!widget.bot.isConnected || _broker.isEmpty || _server.isEmpty) return;
 
     final saved = await _storage.getBrokerTradingSymbol(
       broker: _broker,
@@ -102,9 +104,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
 
   Future<void> _loadBrokerSymbols() async {
     final token = await _storage.getPipsMinerSessionToken();
-    final accountId = await _storage.getPipsMinerAccountId();
-
-    if (token == null || token.trim().isEmpty || accountId == null || accountId.trim().isEmpty) {
+    if (token == null || token.trim().isEmpty) {
       if (!mounted) return;
       setState(() => _error = 'Connect the MT5 account first so the broker symbol list can be read.');
       return;
@@ -166,9 +166,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
 
   List<String> _filteredSymbols(String query) {
     final normalized = query.trim().toUpperCase();
-    if (normalized.isEmpty) {
-      return _brokerSymbols.take(40).toList();
-    }
+    if (normalized.isEmpty) return _brokerSymbols.take(40).toList();
 
     final aliases = <String, List<String>>{
       'GOLD': ['XAU'],
@@ -182,10 +180,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
     };
 
     final terms = aliases[normalized] ?? [normalized];
-    return _brokerSymbols
-        .where((symbol) => terms.any(symbol.contains))
-        .take(60)
-        .toList();
+    return _brokerSymbols.where((symbol) => terms.any(symbol.contains)).take(60).toList();
   }
 
   Future<void> _selectSymbol(String symbol) async {
@@ -196,7 +191,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
     _searchController.text = normalized;
     _searchController.selection = TextSelection.collapsed(offset: normalized.length);
 
-    if (_broker.isNotEmpty || _server.isNotEmpty) {
+    if (_broker.isNotEmpty && _server.isNotEmpty) {
       await _storage.saveBrokerTradingSymbol(
         broker: _broker,
         server: _server,
@@ -204,8 +199,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
       );
     }
 
-    if (!mounted) return;
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   @override
@@ -229,9 +223,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
             ),
             const SizedBox(height: 7),
             Text(
-              _broker.isEmpty || _server.isEmpty
-                  ? 'Connect an MT5 account to load the symbols actually offered by its broker.'
-                  : '$_broker • $_server',
+              _broker.isEmpty || _server.isEmpty ? 'Connect an MT5 account to load the symbols actually offered by its broker.' : '$_broker • $_server',
               style: const TextStyle(color: Colors.white38, fontSize: 10),
             ),
             const SizedBox(height: 13),
@@ -246,12 +238,8 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: IconButton(
                   tooltip: 'Refresh broker symbols',
-                  onPressed: connected && !widget.bot.isBotRunning && !_loading
-                      ? () => _loadBrokerSymbols()
-                      : null,
-                  icon: _loading
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.refresh_rounded),
+                  onPressed: connected && !widget.bot.isBotRunning && !_loading ? () => _loadBrokerSymbols() : null,
+                  icon: _loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh_rounded),
                 ),
               ),
             ),
@@ -296,11 +284,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
                       selectedColor: AppTheme.primaryColor.withOpacity(.18),
                       backgroundColor: AppTheme.darkSurfaceVariant,
                       side: BorderSide(color: isSelected ? AppTheme.primaryColor.withOpacity(.55) : AppTheme.darkBorder),
-                      labelStyle: TextStyle(
-                        color: isSelected ? AppTheme.primaryColor : Colors.white54,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      labelStyle: TextStyle(color: isSelected ? AppTheme.primaryColor : Colors.white54, fontSize: 10, fontWeight: FontWeight.w800),
                     );
                   }).toList(),
                 ),
