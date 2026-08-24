@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -192,7 +192,7 @@ class AppUpdateService {
           );
         }
       }
-    } catch (error) {
+    } catch (_) {
       if (context.mounted) {
         await _showMessage(
           context,
@@ -232,7 +232,9 @@ class AppUpdateService {
             children: [
               LinearProgressIndicator(value: value > 0 ? value : null),
               const SizedBox(height: 12),
-              Text(value > 0 ? '${(value * 100).round()}%' : 'Starting download…'),
+              Text(
+                value > 0 ? '${(value * 100).round()}%' : 'Starting download…',
+              ),
             ],
           ),
         ),
@@ -250,7 +252,8 @@ class AppUpdateService {
           responseType: ResponseType.bytes,
           followRedirects: true,
           maxRedirects: 8,
-          validateStatus: (status) => status != null && status >= 200 && status < 400,
+          validateStatus: (status) =>
+              status != null && status >= 200 && status < 400,
         ),
       );
 
@@ -265,7 +268,7 @@ class AppUpdateService {
         dialogOpen = false;
         Navigator.of(context, rootNavigator: true).pop();
       }
-      // Ensure the dialog future is consumed so it does not outlive the update flow.
+      // The dialog is either already closed or will be completed by the pop above.
       unawaited(dialogFuture);
     }
   }
