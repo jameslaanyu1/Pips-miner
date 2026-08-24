@@ -26,11 +26,9 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // Use GitHub's public REST API for release discovery instead of the Atom
-  // feed. This gives us a structured response and avoids relying on feed
-  // parsing/redirect behavior on Android. GitHub documents this endpoint as
-  // the public "Get the latest release" endpoint.
-  static const _latestReleaseApiUrl = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest';
+  // Release discovery deliberately uses github.com rather than api.github.com.
+  // The phone already reaches github.com for APK downloads, while the REST API
+  // is subject to a 60/hour unauthenticated limit per originating IP.
   static const _latestReleaseUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
   static const _latestApkUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
 
@@ -41,34 +39,39 @@ class AppUpdateService {
   Future<UpdateCheckResult> checkForUpdateDetailed() async {
     final installedVersion = (await PackageInfo.fromPlatform()).version;
     try {
-      final response = await _feedClient.get(_latestReleaseApiUrl);
-      if (response.trim().isEmpty) {
-        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub returned an empty release response.');
+      final version = await _feedClient.getLatestReleaseVersion(_latestReleaseUrl);
+      if (version == null) {
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.failed,
+          installedVersion: installedVersion,
+          message: 'GitHub did not return a compatible Pips Miner release.',
+        );
       }
 
-      final latestRelease = _parseLatestRelease(response);
-      if (latestRelease == null) {
-        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'GitHub did not return a compatible Pips Miner release.');
+      if (_compareVersions(version, installedVersion) <= 0) {
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.upToDate,
+          installedVersion: installedVersion,
+          message: 'Installed $installedVersion; latest published release is $version.',
+        );
       }
-      if (_compareVersions(latestRelease.version, installedVersion) <= 0) {
-        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest published release is ${latestRelease.version}.');
-      }
-      return UpdateCheckResult(status: UpdateCheckStatus.updateAvailable, installedVersion: installedVersion, update: latestRelease, message: 'Update ${latestRelease.version} found. Installed version is $installedVersion.');
+
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.updateAvailable,
+        installedVersion: installedVersion,
+        update: AppUpdateInfo(
+          version: version,
+          downloadUrl: _latestApkUrl,
+          releaseUrl: _latestReleaseUrl,
+        ),
+        message: 'Update $version found. Installed version is $installedVersion.',
+      );
     } catch (error) {
-      return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Update check failed: $error');
-    }
-  }
-
-  AppUpdateInfo? _parseLatestRelease(String response) {
-    try {
-      final data = jsonDecode(response);
-      if (data is! Map<String, dynamic>) return null;
-      final tag = data['tag_name']?.toString() ?? '';
-      final versionMatch = RegExp(r'\d+(?:\.\d+)+').firstMatch(tag);
-      if (versionMatch == null) return null;
-      return AppUpdateInfo(version: versionMatch.group(0)!, downloadUrl: _latestApkUrl, releaseUrl: _latestReleaseUrl);
-    } catch (_) {
-      return null;
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.failed,
+        installedVersion: installedVersion,
+        message: 'Update check failed: $error',
+      );
     }
   }
 
@@ -130,21 +133,37 @@ class AppUpdateService {
   }
 }
 
-/// Small abstraction used only for the release-discovery request so the
-/// updater's public behavior remains unchanged while Chrome owns the APK download.
+/// Small abstraction used only for release discovery so Chrome owns the APK download.
 class DioLike {
-  Future<String> get(String url) async {
+  Future<String?> getLatestReleaseVersion(String url) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(Uri.parse(url));
+      request.followRedirects = true;
+      request.maxRedirects = 8;
       request.headers.set('User-Agent', 'Pips-Miner-App');
-      request.headers.set('Accept', 'application/vnd.github+json');
-      request.headers.set('X-GitHub-Api-Version', '2026-03-10');
       final response = await request.close();
+
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('GitHub release API returned HTTP ${response.statusCode}.');
+        final body = await response.transform(utf8.decoder).join();
+        throw HttpException('GitHub release page returned HTTP ${response.statusCode}${body.isEmpty ? '' : ': $body'}');
       }
-      return await response.transform(utf8.decoder).join();
+
+      // GitHub's /releases/latest endpoint redirects to the latest release
+      // tag. Read that final redirect location rather than parsing HTML.
+      final redirects = response.redirects;
+      if (redirects.isEmpty) {
+        // Some network/proxy combinations may return the page without
+        // exposing the redirect chain. In that case the page is reachable,
+        // but we cannot safely infer a version from it.
+        await response.drain<void>();
+        return null;
+      }
+
+      final finalLocation = redirects.last.location.toString();
+      final match = RegExp(r'\d+(?:\.\d+)+').firstMatch(finalLocation);
+      await response.drain<void>();
+      return match?.group(0);
     } finally {
       client.close(force: true);
     }
