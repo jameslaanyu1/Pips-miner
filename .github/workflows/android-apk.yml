@@ -53,33 +53,22 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           manifest_path = Path('android/app/src/main/AndroidManifest.xml')
           text = manifest_path.read_text()
           permission = '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
-          if permission not in text:
-              text = text.replace('<application', f'{permission}\n    <application', 1)
-
+          if permission not in text: text = text.replace('<application', f'{permission}\n    <application', 1)
           provider = '''        <provider
               android:name="androidx.core.content.FileProvider"
               android:authorities="${applicationId}.fileProvider"
               android:exported="false"
               android:grantUriPermissions="true">
-              <meta-data
-                  android:name="android.support.FILE_PROVIDER_PATHS"
-                  android:resource="@xml/file_paths" />
+              <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
           </provider>'''
-          if 'androidx.core.content.FileProvider' not in text:
-              text = text.replace('    </application>', f'{provider}\n    </application>', 1)
+          if 'androidx.core.content.FileProvider' not in text: text = text.replace('    </application>', f'{provider}\n    </application>', 1)
           manifest_path.write_text(text)
-
-          xml_dir = Path('android/app/src/main/res/xml')
-          xml_dir.mkdir(parents=True, exist_ok=True)
+          xml_dir = Path('android/app/src/main/res/xml'); xml_dir.mkdir(parents=True, exist_ok=True)
           (xml_dir / 'file_paths.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
-          <paths>
-              <external-path path="Android/data/com.example.pips_miner/" name="files_root" />
-              <external-path path="." name="external_storage_root" />
-          </paths>
+          <paths><external-path path="Android/data/com.example.pips_miner/" name="files_root" /><external-path path="." name="external_storage_root" /></paths>
           ''')
           PY
 
@@ -109,29 +98,22 @@ jobs:
           text=text.replace('compileSdk = flutter.compileSdkVersion','compileSdk = 36',1)
           text=re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"',r'\1namespace = "com.example.pips_miner"',text,count=1)
           if 'applicationId = "com.example.pips_miner"' not in text:
-              marker=text.find('defaultConfig {')
-              if marker<0: raise SystemExit('ERROR: defaultConfig block not found')
-              insert=text.find('\n',marker)+1
+              marker=text.find('defaultConfig {'); insert=text.find('\n',marker)+1
               text=text[:insert]+'        applicationId = "com.example.pips_miner"\n'+text[insert:]
-          else:
-              text=re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"',r'\1applicationId = "com.example.pips_miner"',text,count=1)
+          else: text=re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"',r'\1applicationId = "com.example.pips_miner"',text,count=1)
           if 'isCoreLibraryDesugaringEnabled = true' not in text: text=text.replace('compileOptions {','compileOptions {\n        isCoreLibraryDesugaringEnabled = true',1)
           text=re.sub(r'(?m)^\s*coreLibraryDesugaring\(.*\)\s*$','',text)
           imports='''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
           if 'signingPropertiesFile' not in text: text=imports+text
           if 'create("pipsMinerRelease")' not in text:
-              signing='''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
+              signing='''\n    signingConfigs { create("pipsMinerRelease") {\n        keyAlias = signingProperties.getProperty("keyAlias")\n        keyPassword = signingProperties.getProperty("keyPassword")\n        storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n        storePassword = signingProperties.getProperty("storePassword")\n    } }\n'''
               text=text.replace('android {','android {'+signing,1)
-          marker=text.find('buildTypes {'); release=text.find('release {',marker)
-          if marker<0 or release<0: raise SystemExit('ERROR: release build type not found')
-          release_end=text.find('\n        }',release)
-          if release_end<0: raise SystemExit('ERROR: release build type closing block not found')
+          marker=text.find('buildTypes {'); release=text.find('release {',marker); release_end=text.find('\n        }',release)
           release_block=text[release:release_end]
           release_block=re.sub(r'(?m)^\s*signingConfig\s*=.*$', '            signingConfig = signingConfigs.getByName("pipsMinerRelease")', release_block)
-          if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in release_block:
-              release_block += '\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")'
+          if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in release_block: release_block += '\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")'
           text=text[:release]+release_block+text[release_end:]
-          if 'desugar_jdk_libs:2.1.5' not in text: text=text.rstrip()+'\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n'
+          if 'desugar_jdk_libs:2.1.5' not in text: text=text.rstrip()+'\n\ndependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5") }\n'
           path.write_text(text)
           PY
 
@@ -141,21 +123,16 @@ jobs:
           expected='com.example.pips_miner'
           namespace=$(sed -n 's/^[[:space:]]*namespace[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -1)
           application_id=$(sed -n 's/^[[:space:]]*applicationId[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -1)
-          echo "Expected package: $expected"; echo "Namespace: $namespace"; echo "ApplicationId: $application_id"
           test "$namespace" = "$expected"; test "$application_id" = "$expected"
 
       - name: Install dependencies
         run: flutter pub get
-
       - name: Generate app icons
         run: dart run flutter_launcher_icons
-
       - name: Remove generated widget test
         run: rm -f test/widget_test.dart
-
       - name: Analyze Flutter project
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
-
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
 
@@ -165,31 +142,22 @@ jobs:
           PIPS_MINER_KEYSTORE_PASSWORD: ${{ secrets.PIPS_MINER_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
-          APK='build/app/outputs/flutter-apk/app-release.apk'
-          KEYSTORE='android/app/Pips-Miner-release.jks'
-          expected_package='com.example.pips_miner'
+          APK='build/app/outputs/flutter-apk/app-release.apk'; KEYSTORE='android/app/Pips-Miner-release.jks'; expected_package='com.example.pips_miner'
           build_tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          test -f "$APK" || { echo "ERROR: APK not found: $APK"; exit 1; }
-          actual_package=$("$build_tools/aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
-          echo "APK package: $actual_package"
-          test "$actual_package" = "$expected_package"
+          actual_package=$("$build_tools/aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1); test "$actual_package" = "$expected_package"
           expected_cert=$(keytool -list -v -keystore "$KEYSTORE" -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" 2>/dev/null | grep -m1 'SHA256:' | grep -oE '[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){31}' | tr -d ':' | tr '[:lower:]' '[:upper:]')
           actual_cert=$("$build_tools/apksigner" verify --print-certs "$APK" 2>/dev/null | grep -m1 'certificate SHA-256 digest:' | grep -oE '[0-9A-Fa-f]{64}' | tr '[:lower:]' '[:upper:]')
-          echo "Release certificate: $expected_cert"; echo "APK certificate: $actual_cert"
           test -n "$expected_cert"; test -n "$actual_cert"; test "$expected_cert" = "$actual_cert"
-          echo 'PASS: package identity and release certificate match.'
 
       - name: Prepare release APK
         working-directory: .
         run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Pips-Miner-v1.0.${{ github.run_number }}
           path: Pips-Miner-release.apk
           if-no-files-found: error
-
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -200,21 +168,6 @@ jobs:
           files: Pips-Miner-release.apk
           token: ${{ github.token }}
 
-      - name: Update latest release manifest
-        working-directory: .
-        run: |
-          set -euo pipefail
-          version="1.0.${GITHUB_RUN_NUMBER}"
-          cat > latest_release.json <<EOF
-          {
-            "version": "$version",
-            "download_url": "https://github.com/jameslaanyu1/Pips-miner/releases/download/v$version/Pips-Miner-release.apk",
-            "release_url": "https://github.com/jameslaanyu1/Pips-miner/releases/tag/v$version"
-          }
-          EOF
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add latest_release.json
-          git diff --cached --quiet && exit 0
-          git commit -m "Update latest Pips-Miner release manifest v$version"
-          git push origin HEAD:main
+      # This metadata file is deliberately not committed back to main. The
+      # updater reads the published GitHub releases directly, so a manifest
+      # commit cannot create a second release/build cycle.
