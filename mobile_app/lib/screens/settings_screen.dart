@@ -136,24 +136,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   delegate: SliverChildListDelegate([
                     Card(
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
-                        child: Row(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        child: const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Pips-Miner', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
-                                  SizedBox(height: 2),
-                                  Text('life changing pips', style: TextStyle(color: AppTheme.primaryColor, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8)),
-                                ],
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: _updateApp,
-                              icon: const Icon(Icons.system_update_alt_rounded, size: 17),
-                              label: const Text('UPDATE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 10)),
-                            ),
+                            Text('Pips-Miner', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
+                            SizedBox(height: 2),
+                            Text('life changing pips', style: TextStyle(color: AppTheme.primaryColor, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8)),
                           ],
                         ),
                       ),
@@ -202,6 +191,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 14),
                     _EngineSection(bot: bot),
+                    const SizedBox(height: 18),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _updateApp,
+                        icon: const Icon(Icons.system_update_alt_rounded, size: 17),
+                        label: const Text('UPDATE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 10)),
+                      ),
+                    ),
                   ]),
                 ),
               ),
