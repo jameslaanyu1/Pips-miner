@@ -27,10 +27,7 @@ class _EnhancedSettingsScreenState extends State<EnhancedSettingsScreen> {
 
     final storage = SecureStorageService();
     final login = await storage.getMt5Login() ?? '';
-    await storage.saveMt5Connection(
-      login: login,
-      server: selectedServer,
-    );
+    await storage.saveMt5Connection(login: login, server: selectedServer);
 
     if (!mounted) return;
     setState(() => _settingsRevision++);
@@ -70,7 +67,7 @@ class _SettingsBrandOverlay extends StatelessWidget {
         child: Container(
           height: 82,
           padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
-          color: AppTheme.darkBackground,
+          color: AppTheme.darkBg,
           child: Row(
             children: [
               Container(
@@ -78,39 +75,19 @@ class _SettingsBrandOverlay extends StatelessWidget {
                 height: 45,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: AppTheme.primaryColor.withOpacity(.30),
-                  ),
+                  border: Border.all(color: AppTheme.accentColor.withOpacity(.30)),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: Image.asset(
-                  'assets/pips_miner_pro_icon.png',
-                  fit: BoxFit.cover,
-                ),
+                child: Image.asset('assets/pips_miner_pro_icon.png', fit: BoxFit.cover),
               ),
               const SizedBox(width: 12),
               const Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Pips-Miner',
-                    style: TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -.6,
-                    ),
-                  ),
+                  Text('Pips-Miner', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800, letterSpacing: -.6)),
                   SizedBox(height: 2),
-                  Text(
-                    'life changing pips',
-                    style: TextStyle(
-                      color: AppTheme.primaryColor,
-                      fontSize: 9.5,
-                      letterSpacing: 1.0,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                  Text('life changing pips', style: TextStyle(color: AppTheme.accentColor, fontSize: 9.5, letterSpacing: 1.0, fontWeight: FontWeight.w800)),
                 ],
               ),
             ],
@@ -123,7 +100,6 @@ class _SettingsBrandOverlay extends StatelessWidget {
 
 class _BrokerSearchButton extends StatelessWidget {
   const _BrokerSearchButton({required this.onPressed});
-
   final VoidCallback onPressed;
 
   @override
@@ -138,22 +114,14 @@ class _BrokerSearchButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppTheme.primaryColor.withOpacity(.35)),
+            border: Border.all(color: AppTheme.accentColor.withOpacity(.35)),
           ),
           child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.search_rounded, size: 17, color: AppTheme.primaryColor),
+              Icon(Icons.search_rounded, size: 17, color: AppTheme.accentColor),
               SizedBox(width: 6),
-              Text(
-                'FIND BROKER SERVER',
-                style: TextStyle(
-                  color: AppTheme.primaryColor,
-                  fontSize: 8.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: .5,
-                ),
-              ),
+              Text('FIND BROKER SERVER', style: TextStyle(color: AppTheme.accentColor, fontSize: 8.5, fontWeight: FontWeight.w800, letterSpacing: .5)),
             ],
           ),
         ),
@@ -172,7 +140,6 @@ class _BrokerServerSearchDialog extends StatefulWidget {
 class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
   final TextEditingController _controller = TextEditingController();
   final BrokerSearchService _service = BrokerSearchService.instance;
-
   bool _loading = false;
   String? _error;
   List<BrokerServerGroup> _results = const [];
@@ -189,34 +156,25 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
       setState(() => _error = 'Enter at least 2 characters of the broker name.');
       return;
     }
-
     FocusScope.of(context).unfocus();
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
+    setState(() { _loading = true; _error = null; });
     try {
       final results = await _service.search(query);
       if (!mounted) return;
       setState(() {
         _results = results;
         _loading = false;
-        if (results.isEmpty) {
-          _error = 'No known MT5 servers matched "$query".';
-        }
+        _error = results.isEmpty ? 'No known MT5 servers matched "$query".' : null;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString().replaceFirst('Exception: ', '');
-      });
+      setState(() { _loading = false; _error = error.toString().replaceFirst('Exception: ', ''); });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final serverCount = _results.fold<int>(0, (sum, group) => sum + group.servers.length);
     return AlertDialog(
       title: const Text('Find MT5 broker server'),
       content: SizedBox(
@@ -229,48 +187,27 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
               autofocus: true,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _search(),
-              decoration: const InputDecoration(
-                labelText: 'BROKER NAME',
-                hintText: 'e.g. IC Markets, Exness, XM',
-                prefixIcon: Icon(Icons.business_rounded),
-              ),
+              decoration: const InputDecoration(labelText: 'BROKER NAME', hintText: 'e.g. IC Markets, Exness, XM', prefixIcon: Icon(Icons.business_rounded)),
             ),
             const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: _loading ? null : _search,
-                icon: _loading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.search_rounded),
+                icon: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.search_rounded),
                 label: Text(_loading ? 'SEARCHING...' : 'SEARCH SERVERS'),
               ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _error!,
-                  style: TextStyle(
-                    color: _results.isEmpty
-                        ? AppTheme.warningColor
-                        : AppTheme.errorColor,
-                    fontSize: 11,
-                  ),
-                ),
-              ),
+              Align(alignment: Alignment.centerLeft, child: Text(_error!, style: const TextStyle(color: AppTheme.warningColor, fontSize: 11))),
             ],
-            if (_results.isNotEmpty) ...[
+            if (serverCount > 0) ...[
               const SizedBox(height: 10),
               Flexible(
                 child: ListView.separated(
                   shrinkWrap: true,
-                  itemCount: _results.fold<int>(0, (sum, group) => sum + group.servers.length),
+                  itemCount: serverCount,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     var offset = 0;
@@ -280,10 +217,7 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
                         return ListTile(
                           dense: true,
                           contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            server,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
+                          title: Text(server, style: const TextStyle(fontWeight: FontWeight.w700)),
                           subtitle: Text(group.broker),
                           leading: const Icon(Icons.dns_outlined),
                           trailing: const Icon(Icons.chevron_right_rounded),
@@ -300,12 +234,7 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('CANCEL'),
-        ),
-      ],
+      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CANCEL'))],
     );
   }
 }
