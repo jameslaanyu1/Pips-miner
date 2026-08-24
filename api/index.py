@@ -9,9 +9,9 @@ public release metadata for the Android updater.
 import re
 
 import requests
-from flask import jsonify
+from flask import jsonify, request
 
-from backend.app import app
+from backend.app import app, meta_request, require_session
 import backend.broker_search  # noqa: F401 - registers broker search route
 
 
@@ -83,6 +83,24 @@ def app_update():
         "releaseUrl": str(release.get("html_url", "")).strip(),
         "assetName": _EXPECTED_APK,
     })
+
+
+@app.get("/api/v1/symbols")
+@require_session
+def account_symbols(session):
+    """Return the symbols actually exposed by the user's connected MT account.
+
+    The account ID comes from the authenticated Pips-Miner session, so symbol
+    discovery is broker/account specific rather than a hard-coded global list.
+    An optional `search` parameter is applied locally to the returned symbol
+    names to keep the MetaApi symbols call deterministic and inexpensive for
+    the mobile selector.
+    """
+    try:
+        result = meta_request("GET", session["account_id"], "/symbols")
+        return result
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
 
 
 # Vercel's Python runtime discovers the Flask WSGI application as `app`.
