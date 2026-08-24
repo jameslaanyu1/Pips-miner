@@ -29,10 +29,10 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // The GitHub Releases API is the single source of truth. Do not use the
-  // repository manifest for version detection because it can lag behind or
-  // contain metadata from a CI run rather than the release list itself.
-  static const _releasesApi = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases?per_page=100';
+  // GitHub Releases is the single source of truth. Ask GitHub directly for
+  // the latest published release instead of selecting a release from a list
+  // or reading repository/CI metadata.
+  static const _latestReleaseApi = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest';
   static const _expectedAppName = 'Pips-Miner';
   static const _expectedApk = 'Pips-Miner-release.apk';
 
@@ -55,7 +55,7 @@ class AppUpdateService {
       }
 
       if (_compareVersions(release.version, installedVersion) <= 0) {
-        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest published APK release is ${release.version}.');
+        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest GitHub release is ${release.version}.');
       }
 
       return UpdateCheckResult(
@@ -82,32 +82,32 @@ class AppUpdateService {
   }
 
   Future<_ReleaseInfo?> _getLatestPublishedRelease() async {
-    final response = await _downloadClient.get<dynamic>(_releasesApi, options: Options(responseType: ResponseType.json, validateStatus: (status) => status != null && status >= 200 && status < 300));
+    final response = await _downloadClient.get<dynamic>(_latestReleaseApi, options: Options(responseType: ResponseType.json, validateStatus: (status) => status != null && status >= 200 && status < 300));
     final data = response.data;
-    if (data is! List) throw const FormatException('GitHub returned an invalid release list.');
+    if (data is! Map) throw const FormatException('GitHub returned invalid latest release data.');
+    if (data['draft'] == true || data['prerelease'] == true) return null;
 
-    _ReleaseInfo? best;
-    for (final item in data) {
-      if (item is! Map || item['draft'] == true || item['prerelease'] == true) continue;
-      final version = _normaliseVersion((item['tag_name'] as String?)?.trim() ?? '');
-      if (version == null) continue;
+    final tag = (data['tag_name'] as String?)?.trim() ?? '';
+    final version = _normaliseVersion(tag);
+    if (version == null) return null;
 
-      final assets = item['assets'];
-      if (assets is! List) continue;
-      String? downloadUrl;
-      for (final asset in assets) {
-        if (asset is Map && asset['name'] == _expectedApk) {
-          final candidate = (asset['browser_download_url'] as String?)?.trim() ?? '';
-          if (candidate.isNotEmpty) downloadUrl = candidate;
-          break;
-        }
+    final assets = data['assets'];
+    if (assets is! List) return null;
+    String? downloadUrl;
+    for (final asset in assets) {
+      if (asset is Map && asset['name'] == _expectedApk) {
+        final candidate = (asset['browser_download_url'] as String?)?.trim() ?? '';
+        if (candidate.isNotEmpty) downloadUrl = candidate;
+        break;
       }
-      if (downloadUrl == null) continue;
-
-      final candidate = _ReleaseInfo(version: version, downloadUrl: downloadUrl, releaseUrl: (item['html_url'] as String?)?.trim() ?? '');
-      if (best == null || _compareVersions(candidate.version, best.version) > 0) best = candidate;
     }
-    return best;
+    if (downloadUrl == null) return null;
+
+    return _ReleaseInfo(
+      version: version,
+      downloadUrl: downloadUrl,
+      releaseUrl: (data['html_url'] as String?)?.trim() ?? '',
+    );
   }
 
   String? _normaliseVersion(String tag) {
