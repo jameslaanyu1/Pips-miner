@@ -12,6 +12,7 @@ import '../services/secure_storage_service.dart';
 class BotProvider extends ChangeNotifier {
   BotProvider() {
     _bindBackgroundService();
+    unawaited(_loadSavedSymbol());
   }
 
   final SecureStorageService _storage = SecureStorageService();
@@ -54,6 +55,15 @@ class BotProvider extends ChangeNotifier {
   double get priceChange => _priceChange;
   String get symbol => _symbol;
   String get accountMode => _isLiveAccount ? 'LIVE' : 'DEMO';
+
+  Future<void> _loadSavedSymbol() async {
+    final saved = await _storage.getTradingSymbol();
+    final normalized = saved?.trim().toUpperCase();
+    if (normalized == null || normalized.isEmpty) return;
+
+    _symbol = normalized;
+    notifyListeners();
+  }
 
   void _bindBackgroundService() {
     final service = FlutterBackgroundService();
@@ -108,27 +118,17 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final sessionToken =
-          await _storage.getPipsMinerSessionToken();
-      final accountId =
-          await _storage.getPipsMinerAccountId();
+      final sessionToken = await _storage.getPipsMinerSessionToken();
+      final accountId = await _storage.getPipsMinerAccountId();
 
-      if (sessionToken == null ||
-          sessionToken.trim().isEmpty ||
-          accountId == null ||
-          accountId.trim().isEmpty) {
+      if (sessionToken == null || sessionToken.trim().isEmpty || accountId == null || accountId.trim().isEmpty) {
         _isConnected = false;
-        _connectionError =
-            'MT5 account is not connected. Connect the account first.';
+        _connectionError = 'MT5 account is not connected. Connect the account first.';
         notifyListeners();
         return;
       }
 
-      _api = MetaApiService(
-        token: sessionToken.trim(),
-        accountId: accountId.trim(),
-      );
-
+      _api = MetaApiService(token: sessionToken.trim(), accountId: accountId.trim());
       final info = await _api!.accountInformation();
 
       _isConnected = true;
@@ -145,11 +145,7 @@ class BotProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> connectMt5({
-    required String login,
-    required String password,
-    required String server,
-  }) async {
+  Future<bool> connectMt5({required String login, required String password, required String server}) async {
     _connectionError = null;
     notifyListeners();
 
@@ -158,78 +154,36 @@ class BotProvider extends ChangeNotifier {
       final requestedPassword = password;
       final requestedServer = server.trim();
 
-      if (requestedLogin.isEmpty ||
-          requestedPassword.isEmpty ||
-          requestedServer.isEmpty) {
-        throw Exception(
-          'MT5 login, password and broker server are required.',
-        );
+      if (requestedLogin.isEmpty || requestedPassword.isEmpty || requestedServer.isEmpty) {
+        throw Exception('MT5 login, password and broker server are required.');
       }
 
       final response = await http.post(
-        Uri.parse(
-          'https://pips-miner-backend.vercel.app/api/v1/connect',
-        ),
-        headers: const {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'login': requestedLogin,
-          'password': requestedPassword,
-          'server': requestedServer,
-          'platform': 'mt5',
-        }),
+        Uri.parse('https://pips-miner-backend.vercel.app/api/v1/connect'),
+        headers: const {'Accept': 'application/json', 'Content-Type': 'application/json'},
+        body: jsonEncode({'login': requestedLogin, 'password': requestedPassword, 'server': requestedServer, 'platform': 'mt5'}),
       );
 
-      if (response.statusCode < 200 ||
-          response.statusCode >= 300) {
+      if (response.statusCode < 200 || response.statusCode >= 300) {
         String message = response.body;
-
         try {
           final decoded = jsonDecode(response.body);
-
-          if (decoded is Map<String, dynamic> &&
-              decoded['error'] != null) {
-            message = decoded['error'].toString();
-          }
+          if (decoded is Map<String, dynamic> && decoded['error'] != null) message = decoded['error'].toString();
         } catch (_) {}
-
         throw Exception(message);
       }
 
       final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) throw Exception('Invalid Pips-Miner connection response.');
 
-      if (decoded is! Map<String, dynamic>) {
-        throw Exception('Invalid Pips-Miner connection response.');
-      }
+      final sessionToken = decoded['sessionToken']?.toString().trim() ?? '';
+      final accountId = decoded['accountId']?.toString().trim() ?? '';
+      if (sessionToken.isEmpty || accountId.isEmpty) throw Exception('Pips-Miner did not return a valid trading session.');
 
-      final sessionToken =
-          decoded['sessionToken']?.toString().trim() ?? '';
-      final accountId =
-          decoded['accountId']?.toString().trim() ?? '';
+      await _storage.savePipsMinerSession(sessionToken: sessionToken, accountId: accountId);
+      await _storage.saveMt5Connection(login: requestedLogin, server: requestedServer);
 
-      if (sessionToken.isEmpty || accountId.isEmpty) {
-        throw Exception(
-          'Pips-Miner did not return a valid trading session.',
-        );
-      }
-
-      await _storage.savePipsMinerSession(
-        sessionToken: sessionToken,
-        accountId: accountId,
-      );
-
-      await _storage.saveMt5Connection(
-        login: requestedLogin,
-        server: requestedServer,
-      );
-
-      _api = MetaApiService(
-        token: sessionToken,
-        accountId: accountId,
-      );
-
+      _api = MetaApiService(token: sessionToken, accountId: accountId);
       final info = await _api!.accountInformation();
 
       _isConnected = true;
@@ -238,7 +192,6 @@ class BotProvider extends ChangeNotifier {
 
       await _fetchBotStatus();
       notifyListeners();
-
       return true;
     } catch (e) {
       _isConnected = false;
@@ -251,58 +204,26 @@ class BotProvider extends ChangeNotifier {
   String _friendlyConnectionError(Object error) {
     final message = error.toString();
     final lower = message.toLowerCase();
-
-    if (lower.contains('401') || lower.contains('403')) {
-      return 'Pips-Miner authentication failed. Connect the MT5 account again.';
-    }
-
-    if (lower.contains('404')) {
-      return 'The Pips-Miner backend could not find this account.';
-    }
-
-    if (lower.contains('429')) {
-      return 'Too many requests. Please wait and reconnect.';
-    }
-
-    if (lower.contains('socketexception') ||
-        lower.contains('failed host lookup')) {
-      return 'Network connection failed. Check the phone internet connection.';
-    }
-
-    if (lower.contains('timeout')) {
-      return 'Connection timed out. Check the internet connection and try again.';
-    }
-
+    if (lower.contains('401') || lower.contains('403')) return 'Pips-Miner authentication failed. Connect the MT5 account again.';
+    if (lower.contains('404')) return 'The Pips-Miner backend could not find this account.';
+    if (lower.contains('429')) return 'Too many requests. Please wait and reconnect.';
+    if (lower.contains('socketexception') || lower.contains('failed host lookup')) return 'Network connection failed. Check the phone internet connection.';
+    if (lower.contains('timeout')) return 'Connection timed out. Check the internet connection and try again.';
     return 'Pips-Miner connection failed: $message';
   }
 
   Future<void> startBot() async {
-    if (!_isConnected || _api == null) {
-      await connect();
-    }
-
-    if (!_isConnected || _api == null) {
-      throw Exception('MT5 is not connected. Connect the account first.');
-    }
+    if (!_isConnected || _api == null) await connect();
+    if (!_isConnected || _api == null) throw Exception('MT5 is not connected. Connect the account first.');
 
     _engineError = null;
-
-    // Do not start the Android trading service until MetaApi is actually
-    // ready. This prevents engine.start() from immediately failing when
-    // deployment is still coming online.
     await _api!.waitUntilReady();
 
     final service = FlutterBackgroundService();
     final alreadyRunning = await service.isRunning();
-
     if (!alreadyRunning) {
       final started = await service.startService();
-
-      if (!started) {
-        throw Exception(
-          'Pips Miner background trading service could not start.',
-        );
-      }
+      if (!started) throw Exception('Pips Miner background trading service could not start.');
     }
 
     _isBotRunning = true;
@@ -315,125 +236,74 @@ class BotProvider extends ChangeNotifier {
     _updateTimer?.cancel();
 
     final service = FlutterBackgroundService();
-
-    // Stop the Android trading engine first so it cannot intentionally
-    // create another position/order while the account is being flattened.
     if (await service.isRunning()) {
       service.invoke('stopService');
-
-      // Give the background isolate time to receive stopService and stop
-      // the engine before we begin closing/cancelling account state.
       for (int attempt = 0; attempt < 30; attempt++) {
-        await Future<void>.delayed(
-          const Duration(milliseconds: 100),
-        );
-
-        if (!await service.isRunning()) {
-          break;
-        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (!await service.isRunning()) break;
       }
     }
 
-    // Reuse the authenticated Pips-Miner session held by this dashboard.
-    if (_api == null) {
-      await connect();
-    }
-
+    if (_api == null) await connect();
     final api = _api;
 
     if (api == null || !_isConnected) {
       _isBotRunning = false;
-      _engineError =
-          'Miner stopped, but the server session is unavailable to verify or close account orders.';
+      _engineError = 'Miner stopped, but the server session is unavailable to verify or close account orders.';
       notifyListeners();
       return;
     }
 
     try {
       await _liquidateAccount(api);
-
       _isBotRunning = false;
       _engineError = null;
-
       await _fetchBotStatus();
     } catch (e) {
       _isBotRunning = false;
-      _engineError =
-          'Miner stopped, but account cleanup was incomplete: $e';
+      _engineError = 'Miner stopped, but account cleanup was incomplete: $e';
     }
-
     notifyListeners();
   }
 
   Future<void> _liquidateAccount(MetaApiService api) async {
     Object? lastError;
-
-    // Repeat because MetaApi/MT5 terminal state is asynchronous.
     for (int attempt = 0; attempt < 3; attempt++) {
       final positions = await api.positions();
       final orders = await api.orders();
 
       for (final raw in positions) {
         if (raw is! Map) continue;
-
         final position = Map<String, dynamic>.from(raw);
         final id = position['id']?.toString();
-
         if (id == null || id.isEmpty) continue;
-
-        try {
-          await api.closePosition(id);
-        } catch (e) {
-          lastError = e;
-        }
+        try { await api.closePosition(id); } catch (e) { lastError = e; }
       }
 
       for (final raw in orders) {
         if (raw is! Map) continue;
-
         final order = Map<String, dynamic>.from(raw);
         final id = order['id']?.toString();
-
         if (id == null || id.isEmpty) continue;
-
-        try {
-          await api.cancelOrder(id);
-        } catch (e) {
-          lastError = e;
-        }
+        try { await api.cancelOrder(id); } catch (e) { lastError = e; }
       }
 
-      await Future<void>.delayed(
-        const Duration(milliseconds: 500),
-      );
-
+      await Future<void>.delayed(const Duration(milliseconds: 500));
       final remainingPositions = await api.positions();
       final remainingOrders = await api.orders();
-
-      if (remainingPositions.isEmpty && remainingOrders.isEmpty) {
-        return;
-      }
+      if (remainingPositions.isEmpty && remainingOrders.isEmpty) return;
     }
 
     final remainingPositions = await api.positions();
     final remainingOrders = await api.orders();
-
-    if (remainingPositions.isNotEmpty ||
-        remainingOrders.isNotEmpty) {
-      throw Exception(
-        'remaining positions=${remainingPositions.length}, '
-        'pending orders=${remainingOrders.length}'
-        '${lastError == null ? '' : '; last error: $lastError'}',
-      );
+    if (remainingPositions.isNotEmpty || remainingOrders.isNotEmpty) {
+      throw Exception('remaining positions=${remainingPositions.length}, pending orders=${remainingOrders.length}${lastError == null ? '' : '; last error: $lastError'}');
     }
   }
 
   void _startUpdates() {
     _updateTimer?.cancel();
-
-    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      await _fetchBotStatus();
-    });
+    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) async { await _fetchBotStatus(); });
   }
 
   Future<void> _fetchBotStatus() async {
@@ -442,21 +312,13 @@ class BotProvider extends ChangeNotifier {
       if (api == null) return;
 
       final positions = await api.positions();
-
-      final strategy = positions
-          .whereType<Map>()
-          .map((p) => Map<String, dynamic>.from(p))
-          .where((p) => p['symbol']?.toString() == _symbol)
-          .toList();
+      final strategy = positions.whereType<Map>().map((p) => Map<String, dynamic>.from(p)).where((p) => p['symbol']?.toString() == _symbol).toList();
 
       if (strategy.isNotEmpty) {
         final p = strategy.first;
         final type = p['type']?.toString() ?? '';
         _currentPosition = type.contains('SELL') ? 'SELL' : 'BUY';
         _entryPrice = _number(p['openPrice']);
-        // Reversal price is supplied by the Android background engine
-        // through the engineStatus event. Do not reference an out-of-scope
-        // event here or overwrite the engine's reversal price.
       } else {
         _currentPosition = null;
         _entryPrice = null;
@@ -465,17 +327,12 @@ class BotProvider extends ChangeNotifier {
 
       final info = await api.accountInformation();
       _balance = _number(info['balance']) ?? _balance;
-
       final equity = _number(info['equity']);
-      if (equity != null) {
-        _profitLoss = equity - _balance;
-      }
-
+      if (equity != null) _profitLoss = equity - _balance;
       _isBotRunning = await FlutterBackgroundService().isRunning();
     } catch (e) {
       debugPrint('Status error: $e');
     }
-
     notifyListeners();
   }
 
@@ -486,8 +343,6 @@ class BotProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    // The Android foreground service owns the trading engine.
-    // Closing the dashboard must NOT stop trading.
     _updateTimer?.cancel();
     _engineStatusSubscription?.cancel();
     _engineErrorSubscription?.cancel();
