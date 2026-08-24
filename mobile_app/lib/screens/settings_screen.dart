@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:pips_miner_app/providers/bot_provider.dart';
 import 'package:pips_miner_app/services/secure_storage_service.dart';
 import 'package:pips_miner_app/theme/app_theme.dart';
+import 'package:pips_miner_app/widgets/broker_aware_symbol_section.dart';
 import 'package:pips_miner_app/widgets/broker_connection_section.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,7 +21,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _loginController;
   late final TextEditingController _serverController;
   late final TextEditingController _passwordController;
-  late final TextEditingController _symbolController;
 
   @override
   void initState() {
@@ -29,7 +29,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loginController = TextEditingController();
     _serverController = TextEditingController();
     _passwordController = TextEditingController();
-    _symbolController = TextEditingController(text: 'XAUUSD');
     _loadConnection();
   }
 
@@ -39,7 +38,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loginController.dispose();
     _serverController.dispose();
     _passwordController.dispose();
-    _symbolController.dispose();
     super.dispose();
   }
 
@@ -48,7 +46,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final login = await _storage.getMt5Login();
     final server = await _storage.getMt5Server();
     final password = await _storage.getMt5Password();
-    final symbol = await _storage.getTradingSymbol();
 
     if (!mounted) return;
     setState(() {
@@ -56,9 +53,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loginController.text = login ?? '';
       _serverController.text = server ?? '';
       _passwordController.text = password ?? '';
-      _symbolController.text = symbol?.trim().isNotEmpty == true
-          ? symbol!.trim().toUpperCase()
-          : 'XAUUSD';
     });
   }
 
@@ -130,7 +124,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 14),
                     _AccountModeSection(bot: bot),
                     const SizedBox(height: 14),
-                    _TradingSection(bot: bot, symbolController: _symbolController),
+                    BrokerAwareSymbolSection(
+                      bot: bot,
+                      brokerController: _brokerController,
+                      serverController: _serverController,
+                    ),
                     const SizedBox(height: 14),
                     const _StrategySection(),
                     const SizedBox(height: 14),
@@ -215,90 +213,6 @@ class _AccountModeSection extends StatelessWidget {
             Text(
               live ? 'LIVE MODE — trades can use real funds.' : 'DEMO MODE — recommended for testing.',
               style: TextStyle(color: live ? AppTheme.warningColor : AppTheme.secondaryColor, fontSize: 10.5, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TradingSection extends StatelessWidget {
-  final BotProvider bot;
-  final TextEditingController symbolController;
-  const _TradingSection({required this.bot, required this.symbolController});
-
-  static const _commonSymbols = <String>[
-    'XAUUSD',
-    'EURUSD',
-    'GBPUSD',
-    'USDJPY',
-    'AUDUSD',
-    'USDCAD',
-    'USDCHF',
-    'NZDUSD',
-    'EURGBP',
-  ];
-
-  void _selectSymbol(String symbol) {
-    symbolController.text = symbol;
-    symbolController.selection = TextSelection.collapsed(offset: symbol.length);
-    bot.updateSettings(symbol: symbol);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = bot.symbol.toUpperCase();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle(title: 'SYMBOL SWITCH', icon: Icons.swap_horiz_rounded),
-            const SizedBox(height: 6),
-            const Text(
-              'Choose the symbol/pair the bot will trade. The selection is remembered and used by the trading engine.',
-              style: TextStyle(color: Colors.white38, fontSize: 10),
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _commonSymbols.map((symbol) {
-                final isSelected = selected == symbol;
-                return ChoiceChip(
-                  label: Text(symbol),
-                  selected: isSelected,
-                  onSelected: bot.isBotRunning ? null : (_) => _selectSymbol(symbol),
-                  selectedColor: AppTheme.primaryColor.withOpacity(.18),
-                  backgroundColor: AppTheme.darkSurfaceVariant,
-                  side: BorderSide(color: isSelected ? AppTheme.primaryColor.withOpacity(.55) : AppTheme.darkBorder),
-                  labelStyle: TextStyle(
-                    color: isSelected ? AppTheme.primaryColor : Colors.white54,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: symbolController,
-              enabled: !bot.isBotRunning,
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                labelText: 'CUSTOM BROKER SYMBOL',
-                hintText: 'Example: XAUUSDm or EURUSD.a',
-                prefixIcon: Icon(Icons.show_chart_rounded),
-              ),
-              onChanged: (value) => bot.updateSettings(symbol: value),
-            ),
-            const SizedBox(height: 13),
-            _InfoTile(
-              icon: Icons.auto_graph_rounded,
-              title: 'SYMBOL-AWARE RISK',
-              value: 'Risk sizing uses the selected symbol, its broker tick/volume specification, live price and your account balance.',
             ),
           ],
         ),
@@ -448,38 +362,6 @@ class _ParameterRow extends StatelessWidget {
         children: [
           Expanded(child: Text(title, style: const TextStyle(color: Colors.white54, fontSize: 11))),
           Text(value, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-  const _InfoTile({required this.icon, required this.title, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(color: AppTheme.darkSurfaceVariant, borderRadius: BorderRadius.circular(13)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: AppTheme.accentColor, size: 19),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 8, letterSpacing: .8, fontWeight: FontWeight.w800, color: Colors.white38)),
-                const SizedBox(height: 5),
-                Text(value, style: const TextStyle(fontSize: 10, color: Colors.white54)),
-              ],
-            ),
-          ),
         ],
       ),
     );
