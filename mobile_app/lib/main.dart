@@ -25,9 +25,7 @@ class PipsMinerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => BotProvider()),
-      ],
+      providers: [ChangeNotifierProvider(create: (_) => BotProvider())],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Pips-Miner',
@@ -45,9 +43,10 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   Timer? _updateTimer;
+  Timer? _startupRetryTimer;
   bool _updatePromptOpen = false;
   bool _initialUpdateCheckReported = false;
   BotProvider? _bot;
@@ -56,14 +55,12 @@ class _MainScreenState extends State<MainScreen> {
   bool _wasLiveAccount = false;
   String? _lastConnectionError;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    EnhancedSettingsScreen(),
-  ];
+  final List<Widget> _screens = const [HomeScreen(), EnhancedSettingsScreen()];
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final bot = context.read<BotProvider>();
@@ -74,21 +71,31 @@ class _MainScreenState extends State<MainScreen> {
       _lastConnectionError = bot.connectionError;
       bot.addListener(_handleBotEvents);
       _checkForUpdate();
+
+      // If the first network check races app startup/network establishment,
+      // retry shortly afterwards. This is deliberately independent of the
+      // normal ten-minute polling interval.
+      _startupRetryTimer = Timer(const Duration(seconds: 20), () {
+        if (mounted && !_initialUpdateCheckReported) _checkForUpdate();
+      });
     });
-    _updateTimer = Timer.periodic(
-      const Duration(minutes: 10),
-      (_) => _checkForUpdate(),
-    );
+    _updateTimer = Timer.periodic(const Duration(minutes: 10), (_) => _checkForUpdate());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Always re-check when the user returns to the app. This guarantees a
+      // release published while the app was backgrounded is discovered.
+      unawaited(_checkForUpdate());
+    }
   }
 
   void _handleBotEvents() {
     if (!mounted) return;
     final bot = _bot;
     if (bot == null) return;
-
-    if (!_wasConnected && bot.isConnected) {
-      unawaited(PipsNotificationService.instance.mt5Connected());
-    }
+    if (!_wasConnected && bot.isConnected) unawaited(PipsNotificationService.instance.mt5Connected());
 
     final error = bot.connectionError;
     if (error != null && error.isNotEmpty && error != _lastConnectionError && !bot.isConnected) {
@@ -116,19 +123,10 @@ class _MainScreenState extends State<MainScreen> {
     _updatePromptOpen = true;
     try {
       final result = await AppUpdateService.instance.promptIfUpdateAvailable(context);
-
-      // Only a successful no-update check is surfaced to the user. Network
-      // or service failures are retried on the next scheduled check and do
-      // not appear as a scary technical error on the dashboard.
-      if (!_initialUpdateCheckReported &&
-          mounted &&
-          result.status == UpdateCheckStatus.upToDate) {
+      if (!_initialUpdateCheckReported && mounted && result.status == UpdateCheckStatus.upToDate) {
         _initialUpdateCheckReported = true;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result.message),
-            duration: const Duration(seconds: 4),
-          ),
+          SnackBar(content: Text(result.message), duration: const Duration(seconds: 4)),
         );
       } else if (result.status == UpdateCheckStatus.upToDate) {
         _initialUpdateCheckReported = true;
@@ -140,7 +138,9 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _updateTimer?.cancel();
+    _startupRetryTimer?.cancel();
     _bot?.removeListener(_handleBotEvents);
     super.dispose();
   }
@@ -148,27 +148,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _screens),
       bottomNavigationBar: NavigationBar(
         height: 72,
         selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          setState(() => _selectedIndex = index);
-        },
+        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
         destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.candlestick_chart_outlined),
-            selectedIcon: Icon(Icons.candlestick_chart),
-            label: 'Trading',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.tune_outlined),
-            selectedIcon: Icon(Icons.tune),
-            label: 'Settings',
-          ),
+          NavigationDestination(icon: Icon(Icons.candlestick_chart_outlined), selectedIcon: Icon(Icons.candlestick_chart), label: 'Trading'),
+          NavigationDestination(icon: Icon(Icons.tune_outlined), selectedIcon: Icon(Icons.tune), label: 'Settings'),
         ],
       ),
     );
