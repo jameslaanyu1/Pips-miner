@@ -90,10 +90,12 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _marketCard(BotProvider bot) {
+    final symbol = bot.symbol.toUpperCase();
+    final marketLabel = symbol == 'XAUUSD' ? 'GOLD' : 'PAIR';
     return _panel(padding: EdgeInsets.zero, child: Column(children: [
-      Padding(padding: const EdgeInsets.fromLTRB(16, 15, 16, 10), child: Row(children: [const Text('XAUUSD', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)), const SizedBox(width: 8), _badge('GOLD', AppTheme.accentColor), const Spacer(), Text(bot.priceChange >= 0 ? '+${bot.priceChange.toStringAsFixed(2)}%' : '${bot.priceChange.toStringAsFixed(2)}%', style: TextStyle(color: bot.priceChange >= 0 ? AppTheme.successColor : AppTheme.errorColor, fontWeight: FontWeight.w800, fontSize: 12))])),
+      Padding(padding: const EdgeInsets.fromLTRB(16, 15, 16, 10), child: Row(children: [Text(symbol, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900)), const SizedBox(width: 8), _badge(marketLabel, AppTheme.accentColor), const Spacer(), Text(bot.priceChange >= 0 ? '+${bot.priceChange.toStringAsFixed(2)}%' : '${bot.priceChange.toStringAsFixed(2)}%', style: TextStyle(color: bot.priceChange >= 0 ? AppTheme.successColor : AppTheme.errorColor, fontWeight: FontWeight.w800, fontSize: 12))])),
       SizedBox(height: 125, width: double.infinity, child: CustomPaint(painter: _MarketPainter(seed: bot.priceChange))),
-      const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 15), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('1 MIN', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700)), Text('VOLATILITY • MOMENTUM', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])),
+      Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 15), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('1 MIN • $symbol', style: const TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700)), const Text('VOLATILITY • MOMENTUM', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])),
       const Divider(height: 1, color: AppTheme.darkBorder),
       Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 12), child: Row(children: [
         const Icon(Icons.radar_rounded, size: 15, color: AppTheme.accentColor),
@@ -116,9 +118,11 @@ class HomeScreen extends StatelessWidget {
     return _panel(child: Column(children: [
       Row(children: [const Text('ACTIVE POSITIONS', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)), const Spacer(), _badge(position ?? 'NONE', position == null ? Colors.white38 : AppTheme.successColor)]),
       const SizedBox(height: 22),
-      Row(children: [Expanded(child: _positionMetric('ENTRY', bot.entryPrice == null ? '--' : bot.entryPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('REVERSAL', bot.stopPrice == null ? '--' : bot.stopPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('STATUS', position ?? '--'))]),
+      Row(children: [Expanded(child: _positionMetric('SYMBOL', bot.symbol)), Expanded(child: _positionMetric('ENTRY', bot.entryPrice == null ? '--' : bot.entryPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('REVERSAL', bot.stopPrice == null ? '--' : bot.stopPrice!.toStringAsFixed(2)))]),
       const SizedBox(height: 16),
-      if (position != null) Align(alignment: Alignment.centerLeft, child: Text('Current $position position', style: const TextStyle(color: Colors.white54, fontSize: 10))),
+      Row(children: [Expanded(child: _positionMetric('STATUS', position ?? '--')), Expanded(child: _positionMetric('MODE', bot.accountMode))]),
+      const SizedBox(height: 16),
+      if (position != null) Align(alignment: Alignment.centerLeft, child: Text('Current ${bot.symbol} $position position', style: const TextStyle(color: Colors.white54, fontSize: 10))),
       const SizedBox(height: 8),
       Container(width: double.infinity, height: 80, decoration: BoxDecoration(color: Colors.white.withOpacity(.025), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.darkBorder)), child: const Center(child: Text('Additional active positions will appear here', style: TextStyle(color: Colors.white24, fontSize: 9)))),
     ]));
