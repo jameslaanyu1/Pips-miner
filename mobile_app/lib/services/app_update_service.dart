@@ -39,9 +39,9 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // The phone previously failed DNS resolution for github.com. Release
-  // discovery therefore goes through the Pips-Miner Vercel backend, which
-  // reads GitHub's latest published release server-side.
+  // Release discovery is server-side so every installed app uses the same
+  // GitHub latest-release source without depending on the phone's GitHub DNS
+  // or anonymous GitHub API rate limit.
   static const _releaseInfoUrl = 'https://pips-miner-backend.vercel.app/api/update';
 
   final Dio _client = Dio(
@@ -49,7 +49,11 @@ class AppUpdateService {
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 15),
       sendTimeout: const Duration(seconds: 10),
-      headers: {'Accept': 'application/json'},
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     ),
   );
   final FlutterAppInstaller _installer = FlutterAppInstaller();
@@ -58,10 +62,15 @@ class AppUpdateService {
       (await checkForUpdateDetailed()).update;
 
   Future<UpdateCheckResult> checkForUpdateDetailed() async {
-    final installedVersion = (await PackageInfo.fromPlatform()).version;
+    final installedVersion = (await PackageInfo.fromPlatform()).version.trim();
 
     try {
-      final response = await _client.get<Map<String, dynamic>>(_releaseInfoUrl);
+      // Cache-bust the public update endpoint. A user must never be given a
+      // stale release response after a new GitHub release has been published.
+      final response = await _client.get<Map<String, dynamic>>(
+        _releaseInfoUrl,
+        queryParameters: {'t': DateTime.now().millisecondsSinceEpoch},
+      );
       final data = response.data;
       if (data == null) {
         return _failed(installedVersion, 'Empty update service response.');
@@ -74,23 +83,29 @@ class AppUpdateService {
         );
       }
 
-      // No published release is a valid no-update state, not an error.
-      if (data['updateAvailable'] != true) {
-        return UpdateCheckResult(
-          status: UpdateCheckStatus.upToDate,
-          installedVersion: installedVersion,
-          message: 'Pips-Miner is up to date.',
-        );
-      }
-
       final version = _cleanVersion(data['version']);
       final downloadUrl = data['downloadUrl']?.toString().trim() ?? '';
       final releaseUrl = data['releaseUrl']?.toString().trim() ?? '';
       final assetName = data['assetName']?.toString().trim() ?? '';
 
-      // The release contract requires this exact production APK asset.
-      if (version == null ||
-          downloadUrl.isEmpty ||
+      // A response without a published release is the only valid no-update
+      // state. A malformed release response is treated as a failure so it
+      // cannot silently hide an available update.
+      if (version == null) {
+        if (data['updateAvailable'] != true) {
+          return UpdateCheckResult(
+            status: UpdateCheckStatus.upToDate,
+            installedVersion: installedVersion,
+            message: 'Pips-Miner is up to date.',
+          );
+        }
+        return _failed(
+          installedVersion,
+          'Latest GitHub release has an invalid version.',
+        );
+      }
+
+      if (downloadUrl.isEmpty ||
           releaseUrl.isEmpty ||
           assetName != 'Pips-Miner-release.apk') {
         return _failed(
@@ -232,9 +247,7 @@ class AppUpdateService {
             children: [
               LinearProgressIndicator(value: value > 0 ? value : null),
               const SizedBox(height: 12),
-              Text(
-                value > 0 ? '${(value * 100).round()}%' : 'Starting download…',
-              ),
+              Text(value > 0 ? '${(value * 100).round()}%' : 'Starting download…'),
             ],
           ),
         ),
@@ -252,8 +265,7 @@ class AppUpdateService {
           responseType: ResponseType.bytes,
           followRedirects: true,
           maxRedirects: 8,
-          validateStatus: (status) =>
-              status != null && status >= 200 && status < 400,
+          validateStatus: (status) => status != null && status >= 200 && status < 400,
         ),
       );
 
@@ -268,7 +280,6 @@ class AppUpdateService {
         dialogOpen = false;
         Navigator.of(context, rootNavigator: true).pop();
       }
-      // The dialog is either already closed or will be completed by the pop above.
       unawaited(dialogFuture);
     }
   }
