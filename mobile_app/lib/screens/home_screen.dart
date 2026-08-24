@@ -30,8 +30,6 @@ class HomeScreen extends StatelessWidget {
                       _marketCard(bot),
                       const SizedBox(height: 14),
                       _positionCard(bot),
-                      const SizedBox(height: 10),
-                      _engineCard(bot),
                       const SizedBox(height: 14),
                       _botControl(bot),
                     ]),
@@ -96,6 +94,20 @@ class HomeScreen extends StatelessWidget {
       Padding(padding: const EdgeInsets.fromLTRB(16, 15, 16, 10), child: Row(children: [const Text('XAUUSD', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900)), const SizedBox(width: 8), _badge('GOLD', AppTheme.accentColor), const Spacer(), Text(bot.priceChange >= 0 ? '+${bot.priceChange.toStringAsFixed(2)}%' : '${bot.priceChange.toStringAsFixed(2)}%', style: TextStyle(color: bot.priceChange >= 0 ? AppTheme.successColor : AppTheme.errorColor, fontWeight: FontWeight.w800, fontSize: 12))])),
       SizedBox(height: 125, width: double.infinity, child: CustomPaint(painter: _MarketPainter(seed: bot.priceChange))),
       const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 15), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('1 MIN', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700)), Text('VOLATILITY • MOMENTUM', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])),
+      const Divider(height: 1, color: AppTheme.darkBorder),
+      Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 12), child: Row(children: [
+        const Icon(Icons.radar_rounded, size: 15, color: AppTheme.accentColor),
+        const SizedBox(width: 7),
+        const Text('SIGNAL ENGINE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, letterSpacing: .8)),
+        const SizedBox(width: 8),
+        Text(bot.isBotRunning ? 'SCANNING' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 8, fontWeight: FontWeight.w800)),
+        const Spacer(),
+        _compactSignal('V', bot.isBotRunning ? 'HIGH' : 'READY', bot.isBotRunning ? AppTheme.warningColor : Colors.white54),
+        const SizedBox(width: 5),
+        _compactSignal('M', bot.isBotRunning ? 'ACTIVE' : 'WAIT', bot.isBotRunning ? AppTheme.successColor : Colors.white54),
+        const SizedBox(width: 5),
+        _compactSignal('B', bot.currentPosition ?? 'NEUTRAL', AppTheme.accentColor),
+      ])),
     ]));
   }
 
@@ -103,31 +115,16 @@ class HomeScreen extends StatelessWidget {
     final position = bot.currentPosition;
     return _panel(child: Column(children: [
       Row(children: [const Text('ACTIVE POSITIONS', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)), const Spacer(), _badge(position ?? 'NONE', position == null ? Colors.white38 : AppTheme.successColor)]),
-      const SizedBox(height: 18),
-      Row(children: [Expanded(child: _positionMetric('ENTRY', bot.entryPrice == null ? '--' : bot.entryPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('REVERSAL', bot.stopPrice == null ? '--' : bot.stopPrice!.toStringAsFixed(2)))]),
-      const SizedBox(height: 12),
-      if (position != null)
-        Align(alignment: Alignment.centerLeft, child: Text('Current $position position', style: const TextStyle(color: Colors.white54, fontSize: 10))),
+      const SizedBox(height: 22),
+      Row(children: [Expanded(child: _positionMetric('ENTRY', bot.entryPrice == null ? '--' : bot.entryPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('REVERSAL', bot.stopPrice == null ? '--' : bot.stopPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('STATUS', position ?? '--'))]),
+      const SizedBox(height: 16),
+      if (position != null) Align(alignment: Alignment.centerLeft, child: Text('Current $position position', style: const TextStyle(color: Colors.white54, fontSize: 10))),
+      const SizedBox(height: 8),
+      Container(width: double.infinity, height: 80, decoration: BoxDecoration(color: Colors.white.withOpacity(.025), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.darkBorder)), child: const Center(child: Text('Additional active positions will appear here', style: TextStyle(color: Colors.white24, fontSize: 9)))),
     ]));
   }
 
-  Widget _engineCard(BotProvider bot) {
-    return _panel(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), child: Row(children: [
-      const Icon(Icons.radar_rounded, size: 16, color: AppTheme.accentColor),
-      const SizedBox(width: 7),
-      const Text('SIGNAL ENGINE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: .8)),
-      const SizedBox(width: 8),
-      Text(bot.isBotRunning ? 'SCANNING' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 8, fontWeight: FontWeight.w800)),
-      const Spacer(),
-      _compactSignal('V', bot.isBotRunning ? 'HIGH' : 'READY', bot.isBotRunning ? AppTheme.warningColor : Colors.white54),
-      const SizedBox(width: 5),
-      _compactSignal('M', bot.isBotRunning ? 'ACTIVE' : 'WAIT', bot.isBotRunning ? AppTheme.successColor : Colors.white54),
-      const SizedBox(width: 5),
-      _compactSignal('B', bot.currentPosition ?? 'NEUTRAL', AppTheme.accentColor),
-    ]));
-  }
-
-  Widget _compactSignal(String label, String value, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5), decoration: BoxDecoration(color: color.withOpacity(.07), borderRadius: BorderRadius.circular(9), border: Border.all(color: color.withOpacity(.20))), child: Text('$label:$value', style: TextStyle(color: color, fontSize: 7, fontWeight: FontWeight.w900)));
+  Widget _compactSignal(String label, String value, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), decoration: BoxDecoration(color: color.withOpacity(.07), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(.20))), child: Text('$label:$value', style: TextStyle(color: color, fontSize: 7, fontWeight: FontWeight.w900)));
 
   Widget _botControl(BotProvider bot) {
     final running = bot.isBotRunning;
