@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:pips_miner_app/providers/bot_provider.dart';
+import 'package:pips_miner_app/services/app_update_service.dart';
 import 'package:pips_miner_app/services/secure_storage_service.dart';
 import 'package:pips_miner_app/theme/app_theme.dart';
 import 'package:pips_miner_app/widgets/broker_aware_symbol_section.dart';
@@ -99,6 +100,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _checkForUpdate() async {
+    if (!mounted) return;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 16),
+            Expanded(child: Text('Checking GitHub for the latest Pips-Miner release…')),
+          ],
+        ),
+      ),
+    );
+
+    final result = await AppUpdateService.instance.checkForUpdateDetailed();
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+
+    if (result.status == UpdateCheckStatus.updateAvailable) {
+      await AppUpdateService.instance.promptIfUpdateAvailable(context);
+      return;
+    }
+
+    if (result.status == UpdateCheckStatus.upToDate) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Pips-Miner is up to date'),
+          content: Text(
+            'You are running version ${result.installedVersion}.\n\nThe latest GitHub release is also ${result.installedVersion}.',
+          ),
+          actions: [
+            FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK')),
+          ],
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Update check failed'),
+        content: Text(result.message),
+        actions: [
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<BotProvider>(
@@ -107,7 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
-              SliverToBoxAdapter(child: _SettingsHeader(bot: bot)),
+              SliverToBoxAdapter(child: _SettingsHeader(bot: bot, onUpdate: _checkForUpdate)),
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 2, 16, 30),
                 sliver: SliverList(
@@ -148,12 +203,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 class _SettingsHeader extends StatelessWidget {
   final BotProvider bot;
-  const _SettingsHeader({required this.bot});
+  final VoidCallback onUpdate;
+  const _SettingsHeader({required this.bot, required this.onUpdate});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 15),
+      padding: const EdgeInsets.fromLTRB(18, 16, 12, 15),
       child: Row(
         children: [
           Container(
@@ -176,6 +232,12 @@ class _SettingsHeader extends StatelessWidget {
                 Text('ENGINE SETTINGS', style: TextStyle(fontSize: 8.5, letterSpacing: 1.25, fontWeight: FontWeight.w700, color: Colors.white38)),
               ],
             ),
+          ),
+          IconButton(
+            tooltip: 'Update app',
+            onPressed: onUpdate,
+            icon: const Icon(Icons.system_update_alt_rounded),
+            color: AppTheme.primaryColor,
           ),
           _StatusPill(
             label: bot.isBotRunning ? 'ACTIVE' : 'IDLE',
