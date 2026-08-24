@@ -25,12 +25,12 @@ class HomeScreen extends StatelessWidget {
                       const SizedBox(height: 18),
                       _accountCard(bot),
                       const SizedBox(height: 10),
-                      _accountModeSelector(bot),
+                      _accountModeDisplay(bot),
                       const SizedBox(height: 14),
                       _marketCard(bot),
                       const SizedBox(height: 14),
                       _positionCard(bot),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
                       _engineCard(bot),
                       const SizedBox(height: 14),
                       _botControl(bot),
@@ -77,13 +77,17 @@ class HomeScreen extends StatelessWidget {
     ]));
   }
 
-  Widget _accountModeSelector(BotProvider bot) {
+  Widget _accountModeDisplay(BotProvider bot) {
     final live = bot.isLiveAccount;
     return _panel(padding: const EdgeInsets.all(12), child: Row(children: [
-      const Icon(Icons.shield_outlined, size: 18, color: AppTheme.primaryColor),
+      Icon(live ? Icons.shield_rounded : Icons.shield_outlined, size: 18, color: live ? AppTheme.warningColor : AppTheme.secondaryColor),
       const SizedBox(width: 9),
-      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('ACCOUNT MODE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)), SizedBox(height: 2), Text('Select trading environment', style: TextStyle(color: Colors.white38, fontSize: 9))])),
-      SegmentedButton<bool>(segments: const [ButtonSegment<bool>(value: false, label: Text('DEMO')), ButtonSegment<bool>(value: true, label: Text('LIVE'))], selected: {live}, onSelectionChanged: bot.isBotRunning ? null : (selection) { if (selection.isNotEmpty) bot.setAccountMode(selection.first); }, style: const ButtonStyle(visualDensity: VisualDensity.compact, textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 9, fontWeight: FontWeight.w800)))),
+      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('ACCOUNT MODE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
+        SizedBox(height: 2),
+        Text('Selected in Settings', style: TextStyle(color: Colors.white38, fontSize: 9)),
+      ])),
+      _badge(live ? 'LIVE ACCOUNT' : 'DEMO ACCOUNT', live ? AppTheme.warningColor : AppTheme.secondaryColor),
     ]));
   }
 
@@ -98,19 +102,32 @@ class HomeScreen extends StatelessWidget {
   Widget _positionCard(BotProvider bot) {
     final position = bot.currentPosition;
     return _panel(child: Column(children: [
-      Row(children: [const Text('ACTIVE POSITION', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)), const Spacer(), _badge(position ?? 'NONE', position == null ? Colors.white38 : AppTheme.successColor)]),
+      Row(children: [const Text('ACTIVE POSITIONS', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)), const Spacer(), _badge(position ?? 'NONE', position == null ? Colors.white38 : AppTheme.successColor)]),
       const SizedBox(height: 18),
       Row(children: [Expanded(child: _positionMetric('ENTRY', bot.entryPrice == null ? '--' : bot.entryPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('REVERSAL', bot.stopPrice == null ? '--' : bot.stopPrice!.toStringAsFixed(2)))]),
+      const SizedBox(height: 12),
+      if (position != null)
+        Align(alignment: Alignment.centerLeft, child: Text('Current $position position', style: const TextStyle(color: Colors.white54, fontSize: 10))),
     ]));
   }
 
   Widget _engineCard(BotProvider bot) {
-    return _panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [const Icon(Icons.radar_rounded, size: 18, color: AppTheme.accentColor), const SizedBox(width: 8), const Text('SIGNAL ENGINE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1)), const Spacer(), Text(bot.isBotRunning ? 'SCANNING' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 9, fontWeight: FontWeight.w800))]),
-      const SizedBox(height: 16),
-      Row(children: [Expanded(child: _signal('VOLATILITY', bot.isBotRunning ? 'HIGH' : 'READY', bot.isBotRunning ? AppTheme.warningColor : Colors.white54)), const SizedBox(width: 10), Expanded(child: _signal('MOMENTUM', bot.isBotRunning ? 'ACTIVE' : 'WAIT', bot.isBotRunning ? AppTheme.successColor : Colors.white54)), const SizedBox(width: 10), Expanded(child: _signal('BIAS', bot.currentPosition ?? 'NEUTRAL', AppTheme.accentColor))]),
+    return _panel(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), child: Row(children: [
+      const Icon(Icons.radar_rounded, size: 16, color: AppTheme.accentColor),
+      const SizedBox(width: 7),
+      const Text('SIGNAL ENGINE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: .8)),
+      const SizedBox(width: 8),
+      Text(bot.isBotRunning ? 'SCANNING' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 8, fontWeight: FontWeight.w800)),
+      const Spacer(),
+      _compactSignal('V', bot.isBotRunning ? 'HIGH' : 'READY', bot.isBotRunning ? AppTheme.warningColor : Colors.white54),
+      const SizedBox(width: 5),
+      _compactSignal('M', bot.isBotRunning ? 'ACTIVE' : 'WAIT', bot.isBotRunning ? AppTheme.successColor : Colors.white54),
+      const SizedBox(width: 5),
+      _compactSignal('B', bot.currentPosition ?? 'NEUTRAL', AppTheme.accentColor),
     ]));
   }
+
+  Widget _compactSignal(String label, String value, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5), decoration: BoxDecoration(color: color.withOpacity(.07), borderRadius: BorderRadius.circular(9), border: Border.all(color: color.withOpacity(.20))), child: Text('$label:$value', style: TextStyle(color: color, fontSize: 7, fontWeight: FontWeight.w900)));
 
   Widget _botControl(BotProvider bot) {
     final running = bot.isBotRunning;
@@ -126,8 +143,6 @@ class HomeScreen extends StatelessWidget {
   Widget _badge(String text, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5), decoration: BoxDecoration(color: color.withOpacity(.10), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(.30))), child: Text(text, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: .6)));
 
   Widget _metric(String label, String value, Color color) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700)), const SizedBox(height: 4), Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w900))]);
-
-  Widget _signal(String label, String value, Color color) => Container(padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8), decoration: BoxDecoration(color: color.withOpacity(.07), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(.20))), child: Column(children: [Text(label, style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w700)), const SizedBox(height: 4), Text(value, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900))]));
 
   Widget _positionMetric(String label, String value) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700)), const SizedBox(height: 5), Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))]);
 }
