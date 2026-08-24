@@ -7,7 +7,6 @@ import 'package:pips_miner_app/theme/app_theme.dart';
 
 class BrokerServerSelection {
   const BrokerServerSelection({required this.broker, required this.server});
-
   final String broker;
   final String server;
 }
@@ -33,15 +32,11 @@ class BrokerConnectionSection extends StatelessWidget {
   });
 
   Future<void> _searchBroker(BuildContext context) async {
-    final query = brokerController.text.trim().isNotEmpty
-        ? brokerController.text.trim()
-        : serverController.text.trim();
-
+    final query = serverController.text.trim();
     final selection = await showDialog<BrokerServerSelection>(
       context: context,
       builder: (_) => _BrokerServerSearchDialog(initialQuery: query),
     );
-
     if (selection == null) return;
     brokerController.text = selection.broker;
     serverController.text = selection.server;
@@ -58,19 +53,19 @@ class BrokerConnectionSection extends StatelessWidget {
             const _SectionTitle(title: 'MT5 CONNECTION', icon: Icons.link_rounded),
             const SizedBox(height: 7),
             const Text(
-              'Select your broker server, then enter your MT5 account credentials.',
+              'Search your broker and choose the MT5 server you want to connect to.',
               style: TextStyle(color: Colors.white38, fontSize: 10.5),
             ),
             const SizedBox(height: 17),
             TextField(
-              controller: brokerController,
+              controller: serverController,
               enabled: !bot.isBotRunning,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _searchBroker(context),
               decoration: InputDecoration(
                 labelText: 'BROKER SERVER',
                 hintText: 'Enter broker name, then search',
-                prefixIcon: const Icon(Icons.business_rounded),
+                prefixIcon: const Icon(Icons.dns_outlined),
                 suffixIcon: IconButton(
                   tooltip: 'Search broker servers',
                   onPressed: bot.isBotRunning ? null : () => _searchBroker(context),
@@ -78,16 +73,14 @@ class BrokerConnectionSection extends StatelessWidget {
                 ),
               ),
             ),
-            if (serverController.text.trim().isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
+            if (brokerController.text.trim().isNotEmpty && serverController.text.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  'Selected server: ${serverController.text.trim()}',
+                  'Broker: ${brokerController.text.trim()}',
                   style: const TextStyle(color: Colors.white54, fontSize: 10),
                 ),
               ),
-            ],
             const SizedBox(height: 10),
             _Field(
               controller: loginController,
@@ -111,18 +104,12 @@ class BrokerConnectionSection extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: bot.isBotRunning ? null : () => onConnect(bot),
                 icon: const Icon(Icons.link_rounded),
-                label: const Text(
-                  'CONNECT MT5 ACCOUNT',
-                  style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: .5),
-                ),
+                label: const Text('CONNECT MT5 ACCOUNT', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: .5)),
               ),
             ),
             if (bot.isConnected) ...[
               const SizedBox(height: 12),
-              const _ConnectionStatus(
-                connected: true,
-                message: 'MT5 CONNECTED • PIPS-MINER READY',
-              ),
+              const _ConnectionStatus(connected: true, message: 'MT5 CONNECTED • PIPS-MINER READY'),
             ],
             if (bot.connectionError != null) ...[
               const SizedBox(height: 12),
@@ -137,7 +124,6 @@ class BrokerConnectionSection extends StatelessWidget {
 
 class _BrokerServerSearchDialog extends StatefulWidget {
   const _BrokerServerSearchDialog({this.initialQuery = ''});
-
   final String initialQuery;
 
   @override
@@ -169,14 +155,12 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
       setState(() => _error = 'Enter at least 2 characters of the broker name.');
       return;
     }
-
     FocusScope.of(context).unfocus();
     setState(() {
       _loading = true;
       _error = null;
       _results = const [];
     });
-
     try {
       final results = await _service.search(query);
       if (!mounted) return;
@@ -197,7 +181,6 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
   @override
   Widget build(BuildContext context) {
     final serverCount = _results.fold<int>(0, (sum, group) => sum + group.servers.length);
-
     return AlertDialog(
       title: const Text('Find MT5 broker server'),
       content: SizedBox(
@@ -211,29 +194,20 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
               autofocus: true,
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _search(),
-              decoration: const InputDecoration(
-                labelText: 'BROKER NAME',
-                hintText: 'e.g. IC Markets, Exness, XM',
-                prefixIcon: Icon(Icons.business_rounded),
-              ),
+              decoration: const InputDecoration(labelText: 'BROKER NAME', hintText: 'e.g. IC Markets, Exness, XM', prefixIcon: Icon(Icons.business_rounded)),
             ),
             const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: _loading ? null : _search,
-                icon: _loading
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.search_rounded),
+                icon: _loading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.search_rounded),
                 label: Text(_loading ? 'SEARCHING...' : 'SEARCH SERVERS'),
               ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(_error!, style: const TextStyle(color: AppTheme.warningColor, fontSize: 11)),
-              ),
+              Align(alignment: Alignment.centerLeft, child: Text(_error!, style: const TextStyle(color: AppTheme.warningColor, fontSize: 11))),
             ],
             if (serverCount > 0) ...[
               const SizedBox(height: 10),
@@ -253,9 +227,7 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
                           subtitle: Text(group.broker),
                           leading: const Icon(Icons.dns_outlined),
                           trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: () => Navigator.of(context).pop(
-                            BrokerServerSelection(broker: group.broker, server: server),
-                          ),
+                          onTap: () => Navigator.of(context).pop(BrokerServerSelection(broker: group.broker, server: server)),
                         );
                       }
                       offset += group.servers.length;
@@ -268,9 +240,7 @@ class _BrokerServerSearchDialogState extends State<_BrokerServerSearchDialog> {
           ],
         ),
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CANCEL')),
-      ],
+      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('CANCEL'))],
     );
   }
 }
@@ -279,20 +249,11 @@ class _Field extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final IconData icon;
-  final String? hint;
   final bool obscureText;
   final TextInputType? keyboardType;
   final bool enabled;
 
-  const _Field({
-    required this.controller,
-    required this.label,
-    required this.icon,
-    this.hint,
-    this.obscureText = false,
-    this.keyboardType,
-    this.enabled = true,
-  });
+  const _Field({required this.controller, required this.label, required this.icon, this.obscureText = false, this.keyboardType, this.enabled = true});
 
   @override
   Widget build(BuildContext context) {
@@ -301,11 +262,7 @@ class _Field extends StatelessWidget {
       enabled: enabled,
       obscureText: obscureText,
       keyboardType: keyboardType,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixIcon: Icon(icon),
-      ),
+      decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
     );
   }
 }
@@ -313,33 +270,21 @@ class _Field extends StatelessWidget {
 class _SectionTitle extends StatelessWidget {
   final String title;
   final IconData icon;
-
   const _SectionTitle({required this.title, required this.icon});
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 17, color: AppTheme.primaryColor),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 9.5,
-            letterSpacing: 1.1,
-            fontWeight: FontWeight.w800,
-            color: Colors.white54,
-          ),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 17, color: AppTheme.primaryColor),
+      const SizedBox(width: 8),
+      Text(title, style: const TextStyle(fontSize: 9.5, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Colors.white54)),
+    ],
+  );
 }
 
 class _ConnectionStatus extends StatelessWidget {
   final bool connected;
   final String message;
-
   const _ConnectionStatus({required this.connected, required this.message});
 
   @override
@@ -348,25 +293,12 @@ class _ConnectionStatus extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(.20)),
-      ),
+      decoration: BoxDecoration(color: color.withOpacity(.07), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(.20))),
       child: Row(
         children: [
-          Icon(
-            connected ? Icons.check_circle_rounded : Icons.error_outline_rounded,
-            color: color,
-            size: 18,
-          ),
+          Icon(connected ? Icons.check_circle_rounded : Icons.error_outline_rounded, color: color, size: 18),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
-            ),
-          ),
+          Expanded(child: Text(message, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700))),
         ],
       ),
     );
