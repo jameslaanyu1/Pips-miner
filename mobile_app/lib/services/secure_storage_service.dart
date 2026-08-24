@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SecureStorageService {
@@ -7,6 +9,7 @@ class SecureStorageService {
   static const String _pipsMinerAccountIdKey = 'pips_miner_account_id';
 
   static const String _tradingSymbolKey = 'trading_symbol';
+  static const String _brokerSymbolMapKey = 'broker_symbol_map';
   static const String _mt5BrokerKey = 'mt5_broker';
   static const String _mt5LoginKey = 'mt5_login';
   static const String _mt5ServerKey = 'mt5_server';
@@ -36,10 +39,59 @@ class SecureStorageService {
   }
 
   Future<void> saveTradingSymbol(String symbol) async {
-    await _storage.write(key: _tradingSymbolKey, value: symbol.trim().toUpperCase());
+    final normalized = symbol.trim().toUpperCase();
+    if (normalized.isEmpty) return;
+    await _storage.write(key: _tradingSymbolKey, value: normalized);
   }
 
   Future<String?> getTradingSymbol() async => _storage.read(key: _tradingSymbolKey);
+
+  Future<void> saveBrokerTradingSymbol({
+    required String broker,
+    required String server,
+    required String symbol,
+  }) async {
+    final normalizedSymbol = symbol.trim().toUpperCase();
+    final key = _brokerSymbolKey(broker, server);
+    if (normalizedSymbol.isEmpty || key.isEmpty) return;
+
+    final raw = await _storage.read(key: _brokerSymbolMapKey);
+    Map<String, dynamic> mappings = <String, dynamic>{};
+    if (raw != null && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) mappings = decoded;
+      } catch (_) {}
+    }
+    mappings[key] = normalizedSymbol;
+    await _storage.write(key: _brokerSymbolMapKey, value: jsonEncode(mappings));
+    await saveTradingSymbol(normalizedSymbol);
+  }
+
+  Future<String?> getBrokerTradingSymbol({
+    required String broker,
+    required String server,
+  }) async {
+    final key = _brokerSymbolKey(broker, server);
+    if (key.isEmpty) return null;
+    final raw = await _storage.read(key: _brokerSymbolMapKey);
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        final value = decoded[key]?.toString().trim();
+        if (value != null && value.isNotEmpty) return value.toUpperCase();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  String _brokerSymbolKey(String broker, String server) {
+    final normalizedBroker = broker.trim().toLowerCase();
+    final normalizedServer = server.trim().toLowerCase();
+    if (normalizedBroker.isEmpty && normalizedServer.isEmpty) return '';
+    return '$normalizedBroker|$normalizedServer';
+  }
 
   Future<void> saveMt5Connection({
     required String login,
