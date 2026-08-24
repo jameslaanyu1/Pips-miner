@@ -64,8 +64,20 @@ class AppUpdateService {
         update: AppUpdateInfo(version: release.version, downloadUrl: release.downloadUrl, releaseUrl: release.releaseUrl),
         message: '$_expectedAppName update ${release.version} found. Installed version is $installedVersion.',
       );
-    } catch (_) {
-      return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Could not reach the Pips-Miner update service. Check your internet connection and try again.');
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      final detail = e.message ?? e.type.toString();
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.failed,
+        installedVersion: installedVersion,
+        message: 'GitHub update check failed${status != null ? ' (HTTP $status)' : ''}: $detail',
+      );
+    } catch (e) {
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.failed,
+        installedVersion: installedVersion,
+        message: 'GitHub update check error: $e',
+      );
     }
   }
 
