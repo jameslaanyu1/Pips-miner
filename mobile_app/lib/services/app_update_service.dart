@@ -29,9 +29,10 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // Use the complete release list rather than relying only on /releases/latest.
-  // This prevents a valid published release from being missed when GitHub's
-  // "latest" marker is stale or a release was published out of sequence.
+  // Primary source: a tiny release manifest served from raw.githubusercontent.com.
+  // This avoids making the updater depend exclusively on api.github.com DNS.
+  static const _releaseManifest = 'https://raw.githubusercontent.com/jameslaanyu1/Pips-miner/main/latest_release.json';
+  // Secondary source: the complete GitHub release list, retained as a fallback.
   static const _releasesApi = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases?per_page=100';
   static const _expectedAppName = 'Pips-Miner';
   static const _expectedApk = 'Pips-Miner-release.apk';
@@ -73,16 +74,57 @@ class AppUpdateService {
         update: AppUpdateInfo(version: latestVersion, downloadUrl: release.downloadUrl, releaseUrl: release.releaseUrl),
         message: '$_expectedAppName update $latestVersion found. Installed version is $installedVersion.',
       );
-    } catch (error) {
+    } catch (_) {
+      // Do not expose raw Dio/socket/DNS internals to the user.
       return UpdateCheckResult(
         status: UpdateCheckStatus.failed,
         installedVersion: installedVersion,
-        message: 'Update check failed: $error',
+        message: 'Could not reach the Pips-Miner update service. Check your internet connection and try again.',
       );
     }
   }
 
   Future<_ReleaseInfo?> _getBestPublishedRelease() async {
+    _ReleaseInfo? best;
+
+    // The manifest is authoritative for the newest release and is deliberately
+    // independent of the GitHub REST API hostname.
+    try {
+      final manifestRelease = await _getManifestRelease();
+      if (manifestRelease != null) best = manifestRelease;
+    } catch (_) {}
+
+    // Also consult the API when it is reachable. This catches a release during
+    // the short interval before the manifest commit becomes visible and keeps
+    // the older release-scanning behavior as a safety net.
+    try {
+      final apiRelease = await _getApiRelease();
+      if (apiRelease != null && (best == null || _compareVersions(apiRelease.version, best.version) > 0)) {
+        best = apiRelease;
+      }
+    } catch (_) {}
+
+    if (best == null) throw const SocketException('No GitHub release source could be reached.');
+    return best;
+  }
+
+  Future<_ReleaseInfo?> _getManifestRelease() async {
+    final response = await _downloadClient.get<dynamic>(
+      _releaseManifest,
+      options: Options(responseType: ResponseType.json, validateStatus: (status) => status != null && status >= 200 && status < 300),
+    );
+    final raw = response.data;
+    final data = raw is String ? jsonDecode(raw) : raw;
+    if (data is! Map) throw const FormatException('Invalid release manifest.');
+
+    final version = _normaliseVersion((data['version'] as String?)?.trim() ?? '');
+    final downloadUrl = (data['download_url'] as String?)?.trim() ?? '';
+    final releaseUrl = (data['release_url'] as String?)?.trim() ?? '';
+    if (version == null || downloadUrl.isEmpty) return null;
+    return _ReleaseInfo(version: version, downloadUrl: downloadUrl, releaseUrl: releaseUrl);
+  }
+
+  Future<_ReleaseInfo?> _getApiRelease() async {
     final response = await _downloadClient.get<dynamic>(
       _releasesApi,
       options: Options(
@@ -92,15 +134,13 @@ class AppUpdateService {
     );
 
     final data = response.data;
-    if (data is! List) throw StateError('GitHub returned an invalid release list.');
+    if (data is! List) throw const FormatException('GitHub returned an invalid release list.');
 
     _ReleaseInfo? best;
     for (final item in data) {
-      if (item is! Map) continue;
-      if (item['draft'] == true) continue;
+      if (item is! Map || item['draft'] == true) continue;
 
-      final tag = (item['tag_name'] as String?)?.trim() ?? '';
-      final version = _normaliseVersion(tag);
+      final version = _normaliseVersion((item['tag_name'] as String?)?.trim() ?? '');
       if (version == null) continue;
 
       final assets = item['assets'];

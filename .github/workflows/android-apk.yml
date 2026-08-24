@@ -53,7 +53,6 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import xml.etree.ElementTree as ET
 
           manifest_path = Path('android/app/src/main/AndroidManifest.xml')
           text = manifest_path.read_text()
@@ -200,3 +199,22 @@ jobs:
           make_latest: true
           files: Pips-Miner-release.apk
           token: ${{ github.token }}
+
+      - name: Update latest release manifest
+        working-directory: .
+        run: |
+          set -euo pipefail
+          version="1.0.${GITHUB_RUN_NUMBER}"
+          cat > latest_release.json <<EOF
+          {
+            "version": "$version",
+            "download_url": "https://github.com/jameslaanyu1/Pips-miner/releases/download/v$version/Pips-Miner-release.apk",
+            "release_url": "https://github.com/jameslaanyu1/Pips-miner/releases/tag/v$version"
+          }
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add latest_release.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Update latest Pips-Miner release manifest v$version"
+          git push origin HEAD:main
