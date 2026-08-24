@@ -11,6 +11,7 @@ import re
 import requests
 from flask import jsonify, request
 
+import backend.app as backend_app
 from backend.app import app, meta_request, require_session
 import backend.broker_search  # noqa: F401 - registers broker search route
 
@@ -18,6 +19,54 @@ import backend.broker_search  # noqa: F401 - registers broker search route
 _GITHUB_LATEST_RELEASE = "https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest"
 _EXPECTED_APK = "Pips-Miner-release.apk"
 _VERSION_PATTERN = re.compile(r"^v?(\d+\.\d+\.\d+)$")
+_ACCOUNT_PATH_PATTERN = re.compile(r"/users/current/accounts/([^/]+)")
+_REGION_PATTERN = re.compile(r"^[a-z0-9-]+$")
+_ACCOUNT_REGIONS = {}
+_ORIGINAL_META_RAW = backend_app.meta_raw
+
+
+def _region_aware_meta_raw(method, base_url, path="", **kwargs):
+    """Route MetaApi client requests to the region where the account lives."""
+    if base_url.rstrip("/") != backend_app.METAAPI_CLIENT_URL.rstrip("/"):
+        return _ORIGINAL_META_RAW(method, base_url, path, **kwargs)
+
+    match = _ACCOUNT_PATH_PATTERN.search(path)
+    if not match:
+        return _ORIGINAL_META_RAW(method, base_url, path, **kwargs)
+
+    account_id = match.group(1)
+    region = _ACCOUNT_REGIONS.get(account_id)
+
+    if not region:
+        status_response = _ORIGINAL_META_RAW(
+            "GET",
+            backend_app.METAAPI_PROVISIONING_URL,
+            f"/users/current/accounts/{account_id}",
+        )
+        if status_response.status_code == 200:
+            try:
+                account = status_response.json()
+                region = str(account.get("region", "")).strip().lower()
+                if not region:
+                    replicas = account.get("replicas") or []
+                    if isinstance(replicas, list) and replicas:
+                        region = str(replicas[0].get("region", "")).strip().lower()
+                if region and _REGION_PATTERN.fullmatch(region):
+                    _ACCOUNT_REGIONS[account_id] = region
+                else:
+                    region = None
+            except (TypeError, ValueError):
+                region = None
+
+    if region:
+        base_url = f"https://mt-client-api-v1.{region}.agiliumtrade.ai"
+
+    return _ORIGINAL_META_RAW(method, base_url, path, **kwargs)
+
+
+# backend.app routes resolve meta_raw from that module at request time. This
+# makes both /api/v1/connect and authenticated trading requests region-aware.
+backend_app.meta_raw = _region_aware_meta_raw
 
 
 @app.get("/api/update")
