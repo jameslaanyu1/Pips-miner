@@ -48,6 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final login = await _storage.getMt5Login();
     final server = await _storage.getMt5Server();
     final password = await _storage.getMt5Password();
+    final symbol = await _storage.getTradingSymbol();
 
     if (!mounted) return;
     setState(() {
@@ -55,6 +56,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _loginController.text = login ?? '';
       _serverController.text = server ?? '';
       _passwordController.text = password ?? '';
+      _symbolController.text = symbol?.trim().isNotEmpty == true
+          ? symbol!.trim().toUpperCase()
+          : 'XAUUSD';
     });
   }
 
@@ -224,25 +228,78 @@ class _TradingSection extends StatelessWidget {
   final TextEditingController symbolController;
   const _TradingSection({required this.bot, required this.symbolController});
 
+  static const _commonSymbols = <String>[
+    'XAUUSD',
+    'EURUSD',
+    'GBPUSD',
+    'USDJPY',
+    'AUDUSD',
+    'USDCAD',
+    'USDCHF',
+    'NZDUSD',
+    'EURGBP',
+  ];
+
+  void _selectSymbol(String symbol) {
+    symbolController.text = symbol;
+    symbolController.selection = TextSelection.collapsed(offset: symbol.length);
+    bot.updateSettings(symbol: symbol);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final selected = bot.symbol.toUpperCase();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SectionTitle(title: 'TRADING', icon: Icons.candlestick_chart_outlined),
+            const _SectionTitle(title: 'SYMBOL SWITCH', icon: Icons.swap_horiz_rounded),
+            const SizedBox(height: 6),
+            const Text(
+              'Choose the symbol/pair the bot will trade. The selection is remembered and used by the trading engine.',
+              style: TextStyle(color: Colors.white38, fontSize: 10),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _commonSymbols.map((symbol) {
+                final isSelected = selected == symbol;
+                return ChoiceChip(
+                  label: Text(symbol),
+                  selected: isSelected,
+                  onSelected: bot.isBotRunning ? null : (_) => _selectSymbol(symbol),
+                  selectedColor: AppTheme.primaryColor.withOpacity(.18),
+                  backgroundColor: AppTheme.darkSurfaceVariant,
+                  side: BorderSide(color: isSelected ? AppTheme.primaryColor.withOpacity(.55) : AppTheme.darkBorder),
+                  labelStyle: TextStyle(
+                    color: isSelected ? AppTheme.primaryColor : Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                );
+              }).toList(),
+            ),
             const SizedBox(height: 14),
             TextField(
               controller: symbolController,
               enabled: !bot.isBotRunning,
               textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(labelText: 'TRADING SYMBOL', hintText: 'XAUUSD', prefixIcon: Icon(Icons.show_chart_rounded)),
+              decoration: const InputDecoration(
+                labelText: 'CUSTOM BROKER SYMBOL',
+                hintText: 'Example: XAUUSDm or EURUSD.a',
+                prefixIcon: Icon(Icons.show_chart_rounded),
+              ),
               onChanged: (value) => bot.updateSettings(symbol: value),
             ),
             const SizedBox(height: 13),
-            const _InfoTile(icon: Icons.auto_graph_rounded, title: 'AUTOMATIC POSITION SIZING', value: 'Position size uses account balance and the broker live symbol specification.'),
+            _InfoTile(
+              icon: Icons.auto_graph_rounded,
+              title: 'SYMBOL-AWARE RISK',
+              value: 'Risk sizing uses the selected symbol, its broker tick/volume specification, live price and your account balance.',
+            ),
           ],
         ),
       ),
@@ -306,7 +363,7 @@ class _RiskSection extends StatelessWidget {
             const _ParameterRow(title: 'Volume step', value: '0.01'),
             const _ParameterRow(title: 'Maximum volume', value: '1.00'),
             const SizedBox(height: 10),
-            const Text('Position sizing remains broker-aware and is calculated by the trading engine.', style: TextStyle(color: Colors.white30, fontSize: 10)),
+            const Text('Position sizing remains broker-aware and is calculated by the trading engine for the selected symbol.', style: TextStyle(color: Colors.white30, fontSize: 10)),
           ],
         ),
       ),
