@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'providers/bot_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/enhanced_settings_screen.dart';
 import 'services/app_update_service.dart';
 import 'services/background_execution_service.dart';
 import 'services/pips_notification_service.dart';
@@ -57,7 +58,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = const [
     HomeScreen(),
-    SettingsScreen(),
+    EnhancedSettingsScreen(),
   ];
 
   @override
