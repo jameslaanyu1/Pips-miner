@@ -29,13 +29,16 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const _latestReleaseApi = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest';
+  // Use the complete release list rather than relying only on /releases/latest.
+  // This prevents a valid published release from being missed when GitHub's
+  // "latest" marker is stale or a release was published out of sequence.
+  static const _releasesApi = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases?per_page=100';
   static const _expectedAppName = 'Pips-Miner';
   static const _expectedApk = 'Pips-Miner-release.apk';
 
   final Dio _downloadClient = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
-    receiveTimeout: const Duration(minutes: 5),
+    receiveTimeout: const Duration(minutes: 10),
     sendTimeout: const Duration(seconds: 15),
     headers: const {'User-Agent': 'Pips-Miner-Android-Updater', 'Accept': 'application/vnd.github+json'},
   ));
@@ -46,14 +49,22 @@ class AppUpdateService {
   Future<UpdateCheckResult> checkForUpdateDetailed() async {
     final installedVersion = (await PackageInfo.fromPlatform()).version.trim();
     try {
-      final release = await _getLatestRelease();
+      final release = await _getBestPublishedRelease();
       if (release == null) {
-        return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Could not determine the latest $_expectedAppName release.');
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.upToDate,
+          installedVersion: installedVersion,
+          message: 'Installed version $installedVersion; no newer published APK release was found.',
+        );
       }
 
       final latestVersion = release.version;
       if (_compareVersions(latestVersion, installedVersion) <= 0) {
-        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest published release is $latestVersion.');
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.upToDate,
+          installedVersion: installedVersion,
+          message: 'Installed $installedVersion; latest published APK release is $latestVersion.',
+        );
       }
 
       return UpdateCheckResult(
@@ -63,38 +74,54 @@ class AppUpdateService {
         message: '$_expectedAppName update $latestVersion found. Installed version is $installedVersion.',
       );
     } catch (error) {
-      return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Update check failed: $error');
+      return UpdateCheckResult(
+        status: UpdateCheckStatus.failed,
+        installedVersion: installedVersion,
+        message: 'Update check failed: $error',
+      );
     }
   }
 
-  Future<_ReleaseInfo?> _getLatestRelease() async {
-    final response = await _downloadClient.get<Map<String, dynamic>>(
-      _latestReleaseApi,
-      options: Options(responseType: ResponseType.json, validateStatus: (status) => status != null && status >= 200 && status < 300),
+  Future<_ReleaseInfo?> _getBestPublishedRelease() async {
+    final response = await _downloadClient.get<dynamic>(
+      _releasesApi,
+      options: Options(
+        responseType: ResponseType.json,
+        validateStatus: (status) => status != null && status >= 200 && status < 300,
+      ),
     );
+
     final data = response.data;
-    if (data == null) throw StateError('GitHub returned an empty release response.');
+    if (data is! List) throw StateError('GitHub returned an invalid release list.');
 
-    final tag = (data['tag_name'] as String?)?.trim() ?? '';
-    final version = _normaliseVersion(tag);
-    if (version == null) throw StateError('GitHub latest release has an invalid tag: $tag');
+    _ReleaseInfo? best;
+    for (final item in data) {
+      if (item is! Map) continue;
+      if (item['draft'] == true) continue;
 
-    final htmlUrl = (data['html_url'] as String?)?.trim() ?? '';
-    final assets = data['assets'];
-    if (assets is! List) throw StateError('GitHub latest release has no asset list.');
+      final tag = (item['tag_name'] as String?)?.trim() ?? '';
+      final version = _normaliseVersion(tag);
+      if (version == null) continue;
 
-    Map<String, dynamic>? apk;
-    for (final item in assets) {
-      if (item is Map<String, dynamic> && item['name'] == _expectedApk) {
-        apk = item;
-        break;
+      final assets = item['assets'];
+      if (assets is! List) continue;
+
+      String? downloadUrl;
+      for (final asset in assets) {
+        if (asset is Map && asset['name'] == _expectedApk) {
+          final candidate = (asset['browser_download_url'] as String?)?.trim() ?? '';
+          if (candidate.isNotEmpty) downloadUrl = candidate;
+          break;
+        }
       }
-    }
-    if (apk == null) throw StateError('Latest release $version does not contain $_expectedApk.');
+      if (downloadUrl == null) continue;
 
-    final downloadUrl = (apk['browser_download_url'] as String?)?.trim() ?? '';
-    if (downloadUrl.isEmpty) throw StateError('Latest release $version has no APK download URL.');
-    return _ReleaseInfo(version: version, downloadUrl: downloadUrl, releaseUrl: htmlUrl);
+      final releaseUrl = (item['html_url'] as String?)?.trim() ?? '';
+      final candidate = _ReleaseInfo(version: version, downloadUrl: downloadUrl, releaseUrl: releaseUrl);
+      if (best == null || _compareVersions(candidate.version, best.version) > 0) best = candidate;
+    }
+
+    return best;
   }
 
   String? _normaliseVersion(String tag) {
@@ -138,7 +165,9 @@ class AppUpdateService {
       );
       if (shouldInstall == true && context.mounted) {
         final installed = await _installer.installApk(filePath: apkFile.path);
-        if (!installed && context.mounted) await _showMessage(context, 'Installation could not start', 'Android could not open the downloaded $_expectedApk file.');
+        if (!installed && context.mounted) {
+          await _showMessage(context, 'Installation could not start', 'Android could not open the downloaded $_expectedApk file.');
+        }
       }
     } catch (_) {
       if (context.mounted) await _showMessage(context, 'Update download failed', 'The $_expectedAppName update could not be downloaded. Please try again.');
@@ -172,8 +201,15 @@ class AppUpdateService {
       await _downloadClient.download(
         update.downloadUrl,
         file.path,
-        onReceiveProgress: (received, total) { if (total > 0) progress.value = received / total; },
-        options: Options(responseType: ResponseType.bytes, followRedirects: true, maxRedirects: 8, validateStatus: (status) => status != null && status >= 200 && status < 400),
+        onReceiveProgress: (received, total) {
+          if (total > 0) progress.value = received / total;
+        },
+        options: Options(
+          responseType: ResponseType.bytes,
+          followRedirects: true,
+          maxRedirects: 8,
+          validateStatus: (status) => status != null && status >= 200 && status < 400,
+        ),
       );
       if (!await file.exists() || await file.length() < 1024) throw StateError('Downloaded APK is empty or incomplete.');
       progress.value = 1;
@@ -196,7 +232,14 @@ class AppUpdateService {
   }
 
   Future<void> _showMessage(BuildContext context, String title, String message) async {
-    await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(title: Text(title), content: Text(message), actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))]));
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))],
+      ),
+    );
   }
 }
 
