@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -26,9 +25,9 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // Release discovery deliberately uses github.com rather than api.github.com.
-  // The phone already reaches github.com for APK downloads, while the REST API
-  // is subject to a 60/hour unauthenticated limit per originating IP.
+  // Do not use api.github.com here. Anonymous GitHub REST requests are
+  // rate-limited per public IP. The public release page is the source of
+  // truth and redirects to the current release tag.
   static const _latestReleaseUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest';
   static const _latestApkUrl = 'https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk';
 
@@ -44,7 +43,7 @@ class AppUpdateService {
         return UpdateCheckResult(
           status: UpdateCheckStatus.failed,
           installedVersion: installedVersion,
-          message: 'GitHub did not return a compatible Pips Miner release.',
+          message: 'Could not determine the latest Pips Miner release from GitHub.',
         );
       }
 
@@ -133,39 +132,48 @@ class AppUpdateService {
   }
 }
 
-/// Small abstraction used only for release discovery so Chrome owns the APK download.
+/// Release discovery only. The actual APK download is handed to Chrome.
 class DioLike {
   Future<String?> getLatestReleaseVersion(String url) async {
     final client = HttpClient();
     try {
       final request = await client.getUrl(Uri.parse(url));
-      request.followRedirects = true;
-      request.maxRedirects = 8;
+      // Read the release redirect ourselves. This avoids depending on the
+      // redirect chain being exposed by different Android HTTP implementations.
+      request.followRedirects = false;
       request.headers.set('User-Agent', 'Pips-Miner-App');
       final response = await request.close();
 
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        final body = await response.transform(utf8.decoder).join();
-        throw HttpException('GitHub release page returned HTTP ${response.statusCode}${body.isEmpty ? '' : ': $body'}');
-      }
+      String? location = response.headers.value(HttpHeaders.locationHeader);
+      final status = response.statusCode;
 
-      // GitHub's /releases/latest endpoint redirects to the latest release
-      // tag. Read that final redirect location rather than parsing HTML.
-      final redirects = response.redirects;
-      if (redirects.isEmpty) {
-        // Some network/proxy combinations may return the page without
-        // exposing the redirect chain. In that case the page is reachable,
-        // but we cannot safely infer a version from it.
+      if (status >= 300 && status < 400 && location != null) {
         await response.drain<void>();
-        return null;
+        return _versionFromUrl(location);
       }
 
-      final finalLocation = redirects.last.location.toString();
-      final match = RegExp(r'\d+(?:\.\d+)+').firstMatch(finalLocation);
-      await response.drain<void>();
-      return match?.group(0);
+      if (status >= 200 && status < 300) {
+        // A proxy may have followed the redirect before it reaches us.
+        // Parse the public release page only as a fallback.
+        final body = await response.transform(utf8.decoder).join();
+        return _versionFromText(body);
+      }
+
+      final body = await response.transform(utf8.decoder).join();
+      throw HttpException('GitHub release page returned HTTP $status${body.isEmpty ? '' : ': $body'}');
     } finally {
       client.close(force: true);
     }
+  }
+
+  String? _versionFromUrl(String value) {
+    final match = RegExp(r'(?:^|/)(?:tag/)?v?(\d+(?:\.\d+)+)(?:[/?#]|$)').firstMatch(value);
+    return match?.group(1);
+  }
+
+  String? _versionFromText(String value) {
+    final tagMatch = RegExp(r'/releases/tag/v?(\d+(?:\.\d+)+)').firstMatch(value);
+    if (tagMatch != null) return tagMatch.group(1);
+    return null;
   }
 }
