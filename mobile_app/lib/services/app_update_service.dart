@@ -69,35 +69,25 @@ class AppUpdateService {
     // GitHub Releases is the source of truth. Vercel is retained only as a
     // fallback so a temporary GitHub/API/network problem cannot prevent an
     // installed app from discovering a published release.
-    final sources = <Future<Map<String, dynamic>? Function()>>[];
     try {
       final update = await _queryGitHubLatestRelease();
-      if (update != null) {
-        return _compareRelease(installedVersion, update);
-      }
+      return _compareRelease(installedVersion, update);
     } catch (_) {
       // Try the server-side fallback below.
     }
 
     try {
       final update = await _queryVercelReleaseInfo();
-      if (update != null) {
-        return _compareRelease(installedVersion, update);
-      }
-    } catch (error) {
+      return _compareRelease(installedVersion, update);
+    } catch (_) {
       return _failed(
         installedVersion,
         'Update check is temporarily unavailable. Please try again.',
       );
     }
-
-    return _failed(
-      installedVersion,
-      'No valid Pips-Miner release information was returned.',
-    );
   }
 
-  Future<Map<String, dynamic>?> _queryGitHubLatestRelease() async {
+  Future<Map<String, dynamic>> _queryGitHubLatestRelease() async {
     final response = await _client.get<Map<String, dynamic>>(
       _githubLatestReleaseUrl,
       queryParameters: {'_': DateTime.now().millisecondsSinceEpoch},
@@ -152,7 +142,7 @@ class AppUpdateService {
     };
   }
 
-  Future<Map<String, dynamic>?> _queryVercelReleaseInfo() async {
+  Future<Map<String, dynamic>> _queryVercelReleaseInfo() async {
     final response = await _client.get<Map<String, dynamic>>(
       _releaseInfoUrl,
       queryParameters: {'_': DateTime.now().millisecondsSinceEpoch},
