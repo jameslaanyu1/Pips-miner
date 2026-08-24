@@ -48,6 +48,42 @@ jobs:
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner .
 
+      - name: Configure Android APK installer support
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          manifest_path = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest_path.read_text()
+          permission = '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
+          if permission not in text:
+              text = text.replace('<application', f'{permission}\n    <application', 1)
+
+          provider = '''        <provider
+              android:name="androidx.core.content.FileProvider"
+              android:authorities="${applicationId}.fileProvider"
+              android:exported="false"
+              android:grantUriPermissions="true">
+              <meta-data
+                  android:name="android.support.FILE_PROVIDER_PATHS"
+                  android:resource="@xml/file_paths" />
+          </provider>'''
+          if 'androidx.core.content.FileProvider' not in text:
+              text = text.replace('    </application>', f'{provider}\n    </application>', 1)
+          manifest_path.write_text(text)
+
+          xml_dir = Path('android/app/src/main/res/xml')
+          xml_dir.mkdir(parents=True, exist_ok=True)
+          (xml_dir / 'file_paths.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <external-path path="Android/data/com.example.pips_miner/" name="files_root" />
+              <external-path path="." name="external_storage_root" />
+          </paths>
+          ''')
+          PY
+
       - name: Configure package identity and release signing
         env:
           PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}

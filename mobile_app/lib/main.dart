@@ -117,16 +117,20 @@ class _MainScreenState extends State<MainScreen> {
     try {
       final result = await AppUpdateService.instance.promptIfUpdateAvailable(context);
 
-      if (!_initialUpdateCheckReported && mounted &&
-          result.status != UpdateCheckStatus.updateAvailable) {
+      // Only a successful no-update check is surfaced to the user. Network
+      // or service failures are retried on the next scheduled check and do
+      // not appear as a scary technical error on the dashboard.
+      if (!_initialUpdateCheckReported &&
+          mounted &&
+          result.status == UpdateCheckStatus.upToDate) {
         _initialUpdateCheckReported = true;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result.message),
-            duration: const Duration(seconds: 8),
+            duration: const Duration(seconds: 4),
           ),
         );
-      } else if (!_initialUpdateCheckReported) {
+      } else if (result.status == UpdateCheckStatus.upToDate) {
         _initialUpdateCheckReported = true;
       }
     } finally {
