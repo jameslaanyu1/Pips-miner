@@ -1,0 +1,43 @@
+name: Update Pips Miner release manifest
+
+on:
+  workflow_run:
+    workflows: ["Build and Release Pips Miner APK"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  update-manifest:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Write latest release manifest
+        env:
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          cat > update.json <<EOF
+          {
+            "version": "1.0.${RUN_NUMBER}",
+            "download_url": "https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk",
+            "release_url": "https://github.com/jameslaanyu1/Pips-miner/releases/latest"
+          }
+          EOF
+
+      - name: Commit manifest without triggering another APK build
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update.json
+          if git diff --cached --quiet; then
+            echo "Manifest already current."
+            exit 0
+          fi
+          git commit -m "Update release manifest to v1.0.${{ github.event.workflow_run.run_number }} [skip ci]"
+          git push origin main
