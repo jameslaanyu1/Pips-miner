@@ -15,12 +15,7 @@ class HomeScreen extends StatelessWidget {
 
   Widget _header(BotProvider bot) {
     final connected = bot.isConnected;
-    return Row(children: [
-      Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.accentColor.withOpacity(.28))), clipBehavior: Clip.antiAlias, child: Image.asset('assets/pips_miner_pro_icon.png', fit: BoxFit.cover)),
-      const SizedBox(width: 12),
-      const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Pips-Miner', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)), SizedBox(height: 2), Text('life changing pips', style: TextStyle(color: AppTheme.accentColor, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])),
-      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: connected ? AppTheme.successColor.withOpacity(.10) : Colors.white.withOpacity(.05), borderRadius: BorderRadius.circular(20), border: Border.all(color: connected ? AppTheme.successColor.withOpacity(.30) : Colors.white12)), child: Row(children: [Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: connected ? AppTheme.successColor : Colors.white30)), const SizedBox(width: 6), Text(connected ? 'ONLINE' : 'OFFLINE', style: TextStyle(color: connected ? AppTheme.successColor : Colors.white54, fontSize: 9, fontWeight: FontWeight.w800))])),
-    ]);
+    return Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.accentColor.withOpacity(.28))), clipBehavior: Clip.antiAlias, child: Image.asset('assets/pips_miner_pro_icon.png', fit: BoxFit.cover)), const SizedBox(width: 12), const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Pips-Miner', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)), SizedBox(height: 2), Text('life changing pips', style: TextStyle(color: AppTheme.accentColor, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: connected ? AppTheme.successColor.withOpacity(.10) : Colors.white.withOpacity(.05), borderRadius: BorderRadius.circular(20), border: Border.all(color: connected ? AppTheme.successColor.withOpacity(.30) : Colors.white12)), child: Row(children: [Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: connected ? AppTheme.successColor : Colors.white30)), const SizedBox(width: 6), Text(connected ? 'ONLINE' : 'OFFLINE', style: TextStyle(color: connected ? AppTheme.successColor : Colors.white54, fontSize: 9, fontWeight: FontWeight.w800))]))]);
   }
 
   Widget _accountCard(BotProvider bot) => _panel(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [const Text('ACCOUNT EQUITY', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.2)), const Spacer(), _badge(bot.accountMode, bot.isLiveAccount ? AppTheme.warningColor : AppTheme.secondaryColor)]), const SizedBox(height: 8), Text('Ksh ${bot.balance.toStringAsFixed(2)}', style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: -1)), const SizedBox(height: 16), Row(children: [Expanded(child: _metric('P/L', 'Ksh ${bot.profitLoss >= 0 ? '+' : ''}${bot.profitLoss.toStringAsFixed(2)}', bot.profitLoss >= 0 ? AppTheme.successColor : AppTheme.errorColor)), Expanded(child: _metric('TRADES', '${bot.totalTrades}', Colors.white)), Expanded(child: _metric('WIN RATE', '${bot.winRate.toStringAsFixed(1)}%', AppTheme.accentColor))]) ]));
@@ -32,29 +27,32 @@ class HomeScreen extends StatelessWidget {
 
   Widget _marketCard(BotProvider bot) {
     final symbol = bot.symbol.toUpperCase();
-    return _panel(padding: EdgeInsets.zero, child: Column(children: [
-      Padding(padding: const EdgeInsets.fromLTRB(16, 15, 16, 10), child: Row(children: [Text(symbol, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900)), const Spacer(), Text(bot.priceChange >= 0 ? '+${bot.priceChange.toStringAsFixed(2)}%' : '${bot.priceChange.toStringAsFixed(2)}%', style: TextStyle(color: bot.priceChange >= 0 ? AppTheme.successColor : AppTheme.errorColor, fontWeight: FontWeight.w800, fontSize: 12))])),
-      SizedBox(height: 125, width: double.infinity, child: CustomPaint(painter: _MarketPainter(seed: bot.priceChange))),
-      Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 15), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('1 MIN • $symbol', style: const TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700)), const Text('VOLATILITY • MOMENTUM', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])),
-      const Divider(height: 1, color: AppTheme.darkBorder),
-      Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 12), child: Row(children: [const Icon(Icons.radar_rounded, size: 15, color: AppTheme.accentColor), const SizedBox(width: 7), const Text('SIGNAL ENGINE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, letterSpacing: .8)), const SizedBox(width: 8), Text(bot.isBotRunning ? 'SCANNING' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 8, fontWeight: FontWeight.w800)), const Spacer(), _compactSignal('V', bot.isBotRunning ? 'HIGH' : 'READY', bot.isBotRunning ? AppTheme.warningColor : Colors.white54), const SizedBox(width: 5), _compactSignal('M', bot.isBotRunning ? 'ACTIVE' : 'WAIT', bot.isBotRunning ? AppTheme.successColor : Colors.white54), const SizedBox(width: 5), _compactSignal('B', bot.currentPosition ?? 'NEUTRAL', AppTheme.accentColor)])),
-    ]));
+    return _panel(padding: EdgeInsets.zero, child: Column(children: [Padding(padding: const EdgeInsets.fromLTRB(16, 15, 16, 10), child: Row(children: [Text(symbol, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900)), const Spacer(), Text(bot.priceChange >= 0 ? '+${bot.priceChange.toStringAsFixed(2)}%' : '${bot.priceChange.toStringAsFixed(2)}%', style: TextStyle(color: bot.priceChange >= 0 ? AppTheme.successColor : AppTheme.errorColor, fontWeight: FontWeight.w800, fontSize: 12))])), SizedBox(height: 125, width: double.infinity, child: CustomPaint(painter: _MarketPainter(seed: bot.priceChange))), Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 15), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('1 MIN • $symbol', style: const TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700)), const Text('VOLATILITY • MOMENTUM', style: TextStyle(color: Colors.white30, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])), const Divider(height: 1, color: AppTheme.darkBorder), Padding(padding: const EdgeInsets.fromLTRB(16, 10, 16, 12), child: Row(children: [const Icon(Icons.radar_rounded, size: 15, color: AppTheme.accentColor), const SizedBox(width: 7), const Text('SIGNAL ENGINE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 9, letterSpacing: .8)), const SizedBox(width: 8), Text(bot.isBotRunning ? 'SCANNING' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 8, fontWeight: FontWeight.w800)), const Spacer(), _compactSignal('V', bot.isBotRunning ? 'HIGH' : 'READY', bot.isBotRunning ? AppTheme.warningColor : Colors.white54), const SizedBox(width: 5), _compactSignal('M', bot.isBotRunning ? 'ACTIVE' : 'WAIT', bot.isBotRunning ? AppTheme.successColor : Colors.white54), const SizedBox(width: 5), _compactSignal('B', bot.currentPosition ?? 'NEUTRAL', bot.currentPosition == 'BUY' ? AppTheme.successColor : bot.currentPosition == 'SELL' ? AppTheme.errorColor : AppTheme.accentColor)]))]));
   }
 
   Widget _positionCard(BotProvider bot) {
-    final position = bot.currentPosition;
-    return _panel(child: Column(children: [
-      Row(children: [const Text('ACTIVE POSITIONS', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)), const Spacer(), _badge(position ?? 'NONE', position == null ? Colors.white38 : AppTheme.successColor)]),
-      const SizedBox(height: 22),
-      Row(children: [Expanded(child: _positionMetric('SYMBOL', bot.symbol)), Expanded(child: _positionMetric('ENTRY', bot.entryPrice == null ? '--' : bot.entryPrice!.toStringAsFixed(2))), Expanded(child: _positionMetric('REVERSAL', bot.stopPrice == null ? '--' : bot.stopPrice!.toStringAsFixed(2)))]),
-      const SizedBox(height: 16),
-      Row(children: [Expanded(child: _positionMetric('STATUS', position ?? '--'))]),
-      const SizedBox(height: 16),
-      if (position != null) Align(alignment: Alignment.centerLeft, child: Text('Current ${bot.symbol} $position position', style: const TextStyle(color: Colors.white54, fontSize: 10))),
-      const SizedBox(height: 8),
-      Container(width: double.infinity, height: 80, decoration: BoxDecoration(color: Colors.white.withOpacity(.025), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.darkBorder)), child: const Center(child: Text('Additional active positions will appear here', style: TextStyle(color: Colors.white24, fontSize: 9)))),
-    ]));
+    final active = bot.activeTrades;
+    final trailing = bot.trailingTrades;
+    final rowCount = math.max(active.length, trailing.length);
+    return _panel(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [const Text('ACTIVE ENGINE', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.1)), const Spacer(), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5), decoration: BoxDecoration(color: bot.isBotRunning ? AppTheme.successColor.withOpacity(.10) : Colors.white.withOpacity(.04), borderRadius: BorderRadius.circular(10), border: Border.all(color: bot.isBotRunning ? AppTheme.successColor.withOpacity(.30) : AppTheme.darkBorder)), child: Text(bot.isBotRunning ? 'LIVE • CYCLE ${bot.engineCycle}' : 'STANDBY', style: TextStyle(color: bot.isBotRunning ? AppTheme.successColor : Colors.white38, fontSize: 8, fontWeight: FontWeight.w900)))]), const SizedBox(height: 12), _engineHeader(), const SizedBox(height: 5), if (rowCount == 0) _emptyEngine() else ...List.generate(rowCount, (index) => _engineRow(index, index < active.length ? active[index] : null, index < trailing.length ? trailing[index] : null)), const SizedBox(height: 10), Row(children: [const Icon(Icons.sync_rounded, size: 13, color: AppTheme.accentColor), const SizedBox(width: 6), Text(bot.isBotRunning ? 'Live state • switches automatically on every trigger' : 'Start miner to activate the dynamic engine', style: const TextStyle(color: Colors.white30, fontSize: 9))]) ]));
   }
+
+  Widget _engineHeader() => Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), decoration: BoxDecoration(color: Colors.white.withOpacity(.025), borderRadius: BorderRadius.circular(10)), child: const Row(children: [Expanded(child: Text('ACTIVE', style: TextStyle(color: Colors.white54, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 1))), Expanded(child: Text('TRAILING', style: TextStyle(color: Colors.white54, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 1)))]));
+
+  Widget _engineRow(int index, DynamicTradeRow? active, DynamicTradeRow? trailing) {
+    return Container(margin: const EdgeInsets.only(top: 5), padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10), decoration: BoxDecoration(color: Colors.white.withOpacity(.018), borderRadius: BorderRadius.circular(11), border: Border.all(color: AppTheme.darkBorder)), child: Row(children: [Expanded(child: _tradeCell(active, true, index)), Expanded(child: _tradeCell(trailing, false, index))]));
+  }
+
+  Widget _tradeCell(DynamicTradeRow? trade, bool active, int index) {
+    if (trade == null) return const Text('—', style: TextStyle(color: Colors.white24, fontSize: 12));
+    final buy = trade.direction == 'BUY';
+    final color = buy ? AppTheme.successColor : AppTheme.errorColor;
+    final title = active ? 'Entry ${index + 1} ${trade.direction.toLowerCase()}' : '${trade.direction[0]}${trade.direction.substring(1).toLowerCase()} ${index + 1}';
+    final price = active ? trade.entryPrice : trade.price;
+    return Row(children: [Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: color, boxShadow: [BoxShadow(color: color.withOpacity(.45), blurRadius: 7)])), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w900)), if (price != null) Text(price.toStringAsFixed(2), style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w700))]))]);
+  }
+
+  Widget _emptyEngine() => Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 22), child: const Column(children: [Icon(Icons.swap_vert_rounded, color: Colors.white24, size: 28), SizedBox(height: 6), Text('No active / trailing pair yet', style: TextStyle(color: Colors.white30, fontSize: 9)), SizedBox(height: 3), Text('The next trigger creates the first active + opposite trailing pair.', style: TextStyle(color: Colors.white20, fontSize: 8))]));
 
   Widget _compactSignal(String label, String value, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), decoration: BoxDecoration(color: color.withOpacity(.07), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(.20))), child: Text('$label:$value', style: TextStyle(color: color, fontSize: 7, fontWeight: FontWeight.w900)));
 
@@ -66,7 +64,6 @@ class HomeScreen extends StatelessWidget {
   Widget _panel({required Widget child, EdgeInsets padding = const EdgeInsets.all(16)}) => Container(padding: padding, decoration: BoxDecoration(color: AppTheme.darkSurface, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppTheme.darkBorder)), child: child);
   Widget _badge(String text, Color color) => Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5), decoration: BoxDecoration(color: color.withOpacity(.10), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(.30))), child: Text(text, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: .6)));
   Widget _metric(String label, String value, Color color) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700)), const SizedBox(height: 4), Text(value, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w900))]);
-  Widget _positionMetric(String label, String value) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.w700)), const SizedBox(height: 5), Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900))]);
 }
 
 class _MarketPainter extends CustomPainter {
@@ -80,7 +77,7 @@ class _MarketPainter extends CustomPainter {
     final points = <Offset>[];
     for (var i = 0; i < 32; i++) { final x = size.width * i / 31; final noise = (random.nextDouble() - .5) * 18; final trend = (seed >= 0 ? -1 : 1) * i * .8; final y = size.height * .55 + noise + trend; points.add(Offset(x, y.clamp(8, size.height - 8))); }
     path.moveTo(points.first.dx, points.first.dy);
-    for (var i = 1; i < points.length; i++) { path.lineTo(points[i].dx, points[i].dy); }
+    for (var i = 1; i < points.length; i++) path.lineTo(points[i].dx, points[i].dy);
     canvas.drawPath(path, paint);
   }
   @override
