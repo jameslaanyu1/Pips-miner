@@ -29,10 +29,12 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // GitHub Releases is the single source of truth. Ask GitHub directly for
-  // the latest published release instead of selecting a release from a list
-  // or reading repository/CI metadata.
-  static const _latestReleaseApi = 'https://api.github.com/repos/jameslaanyu1/Pips-miner/releases/latest';
+  // Do not use api.github.com for routine update checks. Unauthenticated REST
+  // API calls are limited to 60 requests/hour per originating IP and can return
+  // HTTP 403 when that shared limit is exhausted. A small public manifest on
+  // raw.githubusercontent.com is much more reliable for installed apps.
+  static const _updateManifestUrl =
+      'https://raw.githubusercontent.com/jameslaanyu1/Pips-miner/main/update.json';
   static const _expectedAppName = 'Pips-Miner';
   static const _expectedApk = 'Pips-Miner-release.apk';
 
@@ -40,7 +42,7 @@ class AppUpdateService {
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(minutes: 10),
     sendTimeout: const Duration(seconds: 15),
-    headers: const {'User-Agent': 'Pips-Miner-Android-Updater', 'Accept': 'application/vnd.github+json'},
+    headers: const {'User-Agent': 'Pips-Miner-Android-Updater', 'Accept': 'application/json'},
   ));
   final FlutterAppInstaller _installer = FlutterAppInstaller();
 
@@ -53,65 +55,43 @@ class AppUpdateService {
       if (release == null) {
         return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; no valid published APK release was found.');
       }
-
       if (_compareVersions(release.version, installedVersion) <= 0) {
-        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest GitHub release is ${release.version}.');
+        return UpdateCheckResult(status: UpdateCheckStatus.upToDate, installedVersion: installedVersion, message: 'Installed $installedVersion; latest Pips-Miner release is ${release.version}.');
       }
-
-      return UpdateCheckResult(
-        status: UpdateCheckStatus.updateAvailable,
-        installedVersion: installedVersion,
-        update: AppUpdateInfo(version: release.version, downloadUrl: release.downloadUrl, releaseUrl: release.releaseUrl),
-        message: '$_expectedAppName update ${release.version} found. Installed version is $installedVersion.',
-      );
+      return UpdateCheckResult(status: UpdateCheckStatus.updateAvailable, installedVersion: installedVersion, update: release, message: '$_expectedAppName update ${release.version} found. Installed version is $installedVersion.');
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       final detail = e.message ?? e.type.toString();
-      return UpdateCheckResult(
-        status: UpdateCheckStatus.failed,
-        installedVersion: installedVersion,
-        message: 'GitHub update check failed${status != null ? ' (HTTP $status)' : ''}: $detail',
-      );
+      return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Pips-Miner update check failed${status != null ? ' (HTTP $status)' : ''}: $detail');
     } catch (e) {
-      return UpdateCheckResult(
-        status: UpdateCheckStatus.failed,
-        installedVersion: installedVersion,
-        message: 'GitHub update check error: $e',
-      );
+      return UpdateCheckResult(status: UpdateCheckStatus.failed, installedVersion: installedVersion, message: 'Pips-Miner update check error: $e');
     }
   }
 
-  Future<_ReleaseInfo?> _getLatestPublishedRelease() async {
-    final response = await _downloadClient.get<dynamic>(_latestReleaseApi, options: Options(responseType: ResponseType.json, validateStatus: (status) => status != null && status >= 200 && status < 300));
-    final data = response.data;
-    if (data is! Map) throw const FormatException('GitHub returned invalid latest release data.');
-    if (data['draft'] == true || data['prerelease'] == true) return null;
-
-    final tag = (data['tag_name'] as String?)?.trim() ?? '';
-    final version = _normaliseVersion(tag);
-    if (version == null) return null;
-
-    final assets = data['assets'];
-    if (assets is! List) return null;
-    String? downloadUrl;
-    for (final asset in assets) {
-      if (asset is Map && asset['name'] == _expectedApk) {
-        final candidate = (asset['browser_download_url'] as String?)?.trim() ?? '';
-        if (candidate.isNotEmpty) downloadUrl = candidate;
-        break;
-      }
-    }
-    if (downloadUrl == null) return null;
-
-    return _ReleaseInfo(
-      version: version,
-      downloadUrl: downloadUrl,
-      releaseUrl: (data['html_url'] as String?)?.trim() ?? '',
+  Future<AppUpdateInfo?> _getLatestPublishedRelease() async {
+    final response = await _downloadClient.get<String>(
+      '$_updateManifestUrl?ts=${DateTime.now().millisecondsSinceEpoch}',
+      options: Options(
+        responseType: ResponseType.plain,
+        validateStatus: (status) => status != null && status >= 200 && status < 300,
+      ),
     );
+    final body = response.data;
+    if (body == null || body.trim().isEmpty) throw const FormatException('Update manifest is empty.');
+
+    final data = jsonDecode(body);
+    if (data is! Map<String, dynamic>) throw const FormatException('Update manifest is invalid.');
+
+    final version = _normaliseVersion(data['version']?.toString().trim() ?? '');
+    final downloadUrl = data['download_url']?.toString().trim() ?? '';
+    final releaseUrl = data['release_url']?.toString().trim() ?? '';
+    if (version == null || downloadUrl.isEmpty) throw const FormatException('Update manifest is missing required fields.');
+
+    return AppUpdateInfo(version: version, downloadUrl: downloadUrl, releaseUrl: releaseUrl);
   }
 
-  String? _normaliseVersion(String tag) {
-    final match = RegExp(r'^v?(\d+(?:\.\d+)+)$').firstMatch(tag);
+  String? _normaliseVersion(String value) {
+    final match = RegExp(r'^v?(\d+(?:\.\d+)+)$').firstMatch(value);
     return match?.group(1);
   }
 
@@ -179,11 +159,4 @@ class AppUpdateService {
   }
 
   Future<void> _showMessage(BuildContext context, String title, String message) async => showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(title: Text(title), content: Text(message), actions: [FilledButton(onPressed: () => Navigator.of(dialogContext).pop(), child: const Text('OK'))]));
-}
-
-class _ReleaseInfo {
-  const _ReleaseInfo({required this.version, required this.downloadUrl, required this.releaseUrl});
-  final String version;
-  final String downloadUrl;
-  final String releaseUrl;
 }
