@@ -71,68 +71,76 @@ backend_app.meta_raw = _region_aware_meta_raw
 
 
 def _update_account_with_provisioning_token(account_id, login, password, server):
-    """Refresh an existing account when the provisioning token has update access.
+    """Legacy compatibility hook.
 
-    MetaApi's /credentials endpoint requires an account-specific configuration
-    token. The provisioning account endpoint can also update credentials, but
-    only when the administrator token has the updateAccount permission.
-
-    If that permission is unavailable, the account is left untouched so the
-    normal connect flow can reuse an already-configured/deployed account. This
-    avoids converting a valid existing account into a hard failure merely
-    because the administrator token is restricted.
+    Existing accounts are now reused without attempting to change credentials.
+    The administrator token does not have to be a configuration token, and
+    MetaApi's /credentials endpoint explicitly requires an account-specific
+    configuration token. The MT5 password is therefore never overwritten here.
     """
-    account_response = _ORIGINAL_META_RAW(
-        "GET",
-        backend_app.METAAPI_PROVISIONING_URL,
-        f"/users/current/accounts/{account_id}",
-    )
-    if account_response.status_code != 200:
-        raise RuntimeError(
-            f"MetaApi account lookup failed before credential update "
-            f"({account_response.status_code}): "
-            f"{backend_app.response_body(account_response)}"
-        )
-
-    try:
-        account = account_response.json()
-    except ValueError:
-        account = {}
-
-    name = str(account.get("name") or f"Pips-Miner-{login}").strip()
-    response = _ORIGINAL_META_RAW(
-        "PUT",
-        backend_app.METAAPI_PROVISIONING_URL,
-        f"/users/current/accounts/{account_id}",
-        json={
-            "password": password,
-            "name": name,
-            "server": server,
-        },
-    )
-
-    if response.status_code in (200, 204):
-        return
-
-    if response.status_code == 403:
-        # The current MetaApi token is valid for account reads but does not
-        # include updateAccount. Reuse the existing account and let the
-        # downstream provisioning/status check determine whether it is already
-        # configured and deployed.
-        return
-
-    body = backend_app.response_body(response)
-    raise RuntimeError(
-        f"MetaApi account update failed ({response.status_code}): {body}"
-    )
+    return
 
 
 # The old backend called PUT /credentials, whose auth-token is explicitly a
 # configuration token. That caused the production error:
 # "Configuration token does not match the account id".
-# Prefer the administrator endpoint; if that token is read/deploy-only, reuse
-# the existing account instead of failing before its current state is checked.
 backend_app.update_existing_credentials = _update_account_with_provisioning_token
+
+
+def _reuse_existing_account(login, password, server, platform):
+    """Resolve the canonical pre-provisioned MetaApi account without mutating it."""
+    existing = backend_app.find_existing_account(login, server, platform)
+    if not existing:
+        raise RuntimeError(
+            "This MT5 account is not registered in the administrator MetaApi account. "
+            "Ask the administrator to provision and deploy it first."
+        )
+
+    account_id = str(existing.get("_id") or existing.get("id") or "").strip()
+    if not account_id:
+        raise RuntimeError("MetaApi returned an account without an ID.")
+
+    return account_id, "reused"
+
+
+# The backend's original create_metaapi_account function attempted to refresh
+# credentials on every login. That is unsafe for accounts configured with a
+# MetaApi configuration token and is unnecessary for an already-provisioned
+# account. Resolve the existing account and inspect its live state instead.
+backend_app.create_metaapi_account = _reuse_existing_account
+
+
+def _deploy_only_when_undeployed(account_id):
+    """Do not call deployAccount for accounts that are already deployed.
+
+    The current MetaApi administrator token lacks deployAccount permission. A
+    deployed account can still be reused and polled for broker connectivity.
+    Only an actually undeployed account needs a provisioning/deployment action.
+    """
+    status = backend_app.provisioning_account(account_id)
+    state = str(status.get("state", "")).upper()
+
+    if state == "DEPLOYED":
+        return
+
+    response = _ORIGINAL_META_RAW(
+        "POST",
+        backend_app.METAAPI_PROVISIONING_URL,
+        f"/users/current/accounts/{account_id}/deploy",
+    )
+    if response.status_code not in (200, 204):
+        body = backend_app.response_body(response)
+        if isinstance(body, dict):
+            message = body.get("message") or body.get("error") or str(body)
+        else:
+            message = str(body)
+        raise RuntimeError(
+            f"MetaApi account is not deployed and this token cannot deploy it "
+            f"({response.status_code}): {message}"
+        )
+
+
+backend_app.deploy_metaapi_account = _deploy_only_when_undeployed
 
 
 @app.get("/api/update")
