@@ -49,7 +49,7 @@ class VelocityExpansion {
   static VelocityExpansionResult analyze(
     List<Candle> candles, {
     int baselinePeriod = 14,
-    double expansionThreshold = 1.5,
+    double expansionThreshold = 1.0,
     int volumeBaselinePeriod = 14,
     double volumeExpansionThreshold = 1.5,
   }) {
@@ -91,7 +91,8 @@ class VelocityExpansion {
     }
 
     final expansionRatio = currentVelocity.abs() / baselineVelocity;
-    final velocityExpanded = expansionRatio >= expansionThreshold;
+    // Smallest true expansion: current velocity must be greater than normal.
+    final velocityExpanded = expansionRatio > expansionThreshold;
 
     // Volume remains calculated for diagnostics/telemetry, but it is NO LONGER
     // an entry gate. A velocity expansion alone is sufficient to enter.
@@ -131,7 +132,7 @@ class VelocityExpansion {
       baselineVolume: baselineVolume,
       volumeExpansionRatio: volumeExpansionRatio,
       volumeExpanded: volumeExpanded,
-      // Entry gate: VELOCITY EXPANSION ONLY.
+      // Entry gate: ANY velocity expansion above baseline.
       expanded: velocityExpanded,
     );
   }
