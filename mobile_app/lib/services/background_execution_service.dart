@@ -24,10 +24,8 @@ Future<void> initializePipsMinerBackgroundService() async {
   );
 
   final notifications = FlutterLocalNotificationsPlugin();
-
   await notifications
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
   await service.configure(
@@ -62,9 +60,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
 
-  if (service is AndroidServiceInstance) {
-    service.setAsForegroundService();
-  }
+  if (service is AndroidServiceInstance) service.setAsForegroundService();
 
   late final VelocityReversalEngine engine;
   late final TradingConfig config;
@@ -72,26 +68,15 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
 
   try {
     final storage = SecureStorageService();
-
-    // The Android trading isolate uses the same authenticated
-    // Pips-Miner backend session as the dashboard.
     final token = await storage.getPipsMinerSessionToken();
     final accountId = await storage.getPipsMinerAccountId();
     final storedSymbol = await storage.getTradingSymbol();
 
-    if (token == null ||
-        token.trim().isEmpty ||
-        accountId == null ||
-        accountId.trim().isEmpty) {
-      throw Exception(
-        'Pips-Miner trading session is not configured. Connect the MT5 account first.',
-      );
+    if (token == null || token.trim().isEmpty || accountId == null || accountId.trim().isEmpty) {
+      throw Exception('No existing Pips-Miner trading session is available. Connect the MT5 account first.');
     }
 
-    api = MetaApiService(
-      token: token.trim(),
-      accountId: accountId.trim(),
-    );
+    api = MetaApiService(token: token.trim(), accountId: accountId.trim());
 
     final symbol = storedSymbol?.trim().isNotEmpty == true
         ? storedSymbol!.trim().toUpperCase()
@@ -107,21 +92,20 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
 
     engine = VelocityReversalEngine(api: api, config: config);
   } catch (e) {
-    debugPrint('Pips Miner background initialization error: $e');
-
     service.invoke('engineError', {
       'fatal': true,
       'message': e.toString().replaceFirst('Exception: ', ''),
     });
-
     service.stopSelf();
     return;
   }
 
   var stopped = false;
+  Timer? tradingTimer;
 
   service.on('stopService').listen((_) {
     stopped = true;
+    tradingTimer?.cancel();
     engine.stop();
     service.stopSelf();
   });
@@ -133,48 +117,67 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
     });
   });
 
-  // Backend/market-data readiness and the first reconciliation are allowed
-  // to fail transiently. Do not terminate the foreground service because of
-  // a temporary MetaApi/backend/broker-data failure. The engine's existing
-  // reconcile logic remains unchanged; we simply retry startup until it can
-  // enter its normal one-second execution loop.
-  var started = false;
-  while (!stopped && !started) {
-    try {
-      await api.waitUntilReady();
-      await engine.start();
-      started = engine.running;
+  Future<void> emergencyCleanupAndShutdown() async {
+    tradingTimer?.cancel();
+    engine.stop();
 
-      if (started) {
-        if (service is AndroidServiceInstance) {
-          service.setForegroundNotificationInfo(
-            title: 'Pips Miner',
-            content: 'Trading engine is running',
-          );
-        }
+    service.invoke('engineError', {
+      'fatal': false,
+      'message': 'Network connection lost. Trading stopped; protecting active Pips Miner positions and orders.',
+    });
 
-        service.invoke('engineStatus', {
-          'running': true,
-          'timestamp': DateTime.now().toIso8601String(),
+    // If the network is completely down, cleanup cannot be sent to MetaApi.
+    // Keep this foreground service alive without trading and retry until the
+    // connection returns. Shutdown occurs only after cleanup is verified.
+    while (!stopped) {
+      try {
+        await engine.cleanupManagedExposure();
+        service.invoke('engineError', {
+          'fatal': true,
+          'message': 'Network failure detected. All Pips Miner positions and orders were closed/cancelled before shutdown.',
         });
-      }
-    } catch (e) {
-      debugPrint('Pips Miner startup/reconciliation error: $e');
-
-      service.invoke('engineError', {
-        'fatal': false,
-        'message': e.toString().replaceFirst('Exception: ', ''),
-      });
-
-      if (!stopped) {
-        await Future<void>.delayed(const Duration(seconds: 3));
+        service.stopSelf();
+        return;
+      } catch (cleanupError) {
+        debugPrint('Pips Miner emergency cleanup pending: $cleanupError');
+        await Future<void>.delayed(const Duration(seconds: 5));
       }
     }
   }
 
-  if (stopped || !started) return;
+  try {
+    // Start queries market data only. The existing authenticated account
+    // session is reused; there is no account readiness/reconnection wait.
+    await api.candles(config.symbol, timeframe: '1m', limit: 100);
+    await engine.start();
+  } catch (e) {
+    if (MetaApiService.isNetworkFailure(e)) {
+      await emergencyCleanupAndShutdown();
+      return;
+    }
 
-  Timer.periodic(const Duration(seconds: 1), (timer) async {
+    // Non-network problems do not turn the bot off. Start the engine and let
+    // its normal one-second loop retry market data on subsequent cycles.
+    service.invoke('engineError', {
+      'fatal': false,
+      'message': e.toString().replaceFirst('Exception: ', ''),
+    });
+    await engine.start();
+  }
+
+  if (service is AndroidServiceInstance) {
+    service.setForegroundNotificationInfo(
+      title: 'Pips Miner',
+      content: 'Scanning market • ${config.symbol}',
+    );
+  }
+
+  service.invoke('engineStatus', {
+    'running': true,
+    'timestamp': DateTime.now().toIso8601String(),
+  });
+
+  tradingTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
     if (stopped || !engine.running) {
       timer.cancel();
       return;
@@ -186,7 +189,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       if (service is AndroidServiceInstance) {
         service.setForegroundNotificationInfo(
           title: 'Pips Miner',
-          content: 'Trading engine running • ${config.symbol}',
+          content: 'Scanning market • ${config.symbol}',
         );
       }
 
@@ -199,6 +202,11 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       });
     } catch (e) {
       debugPrint('Pips Miner background engine tick error: $e');
+
+      if (MetaApiService.isNetworkFailure(e)) {
+        await emergencyCleanupAndShutdown();
+        return;
+      }
 
       service.invoke('engineError', {
         'fatal': false,
