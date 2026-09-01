@@ -1,0 +1,164 @@
+name: Build and Release Pips Miner APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile_app
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+          cache: true
+
+      - name: Stamp release version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          path = Path('pubspec.yaml')
+          text = path.read_text()
+          n = os.environ['GITHUB_RUN_NUMBER']
+          text, count = re.subn(r'^version:\s*[^\n]+$', f'version: 1.0.{n}+{n}', text, count=1, flags=re.MULTILINE)
+          if count != 1:
+              raise SystemExit('ERROR: version field not found')
+          path.write_text(text)
+          PY
+
+      - name: Generate Android platform
+        run: flutter create --platforms=android --project-name=pips_miner .
+
+      - name: Configure Android foreground trading service
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          perms = [
+              '    <uses-permission android:name="android.permission.INTERNET" />',
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
+              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+          ]
+          for permission in perms:
+              name = permission.split('name="', 1)[1].split('"', 1)[0]
+              if name not in text:
+                  text = text.replace('<application', permission + '\n\n    <application', 1)
+          service = '''        <service
+              android:name="id.flutter.flutter_background_service.BackgroundService"
+              android:exported="false"
+              android:foregroundServiceType="specialUse">
+              <property
+                  android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                  android:value="User-initiated foreground trading engine for monitoring and managing the connected MT5 trading account." />
+          </service>'''
+          if 'id.flutter.flutter_background_service.BackgroundService' not in text:
+              text = text.replace('    </application>', service + '\n    </application>', 1)
+          path.write_text(text)
+          PY
+
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/file_paths.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <external-path path="." name="external_storage_root" />
+          </paths>
+          EOF
+
+      - name: Configure package identity and release signing
+        env:
+          PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
+          PIPS_MINER_KEY_ALIAS: ${{ secrets.PIPS_MINER_KEY_ALIAS }}
+          PIPS_MINER_KEYSTORE_PASSWORD: ${{ secrets.PIPS_MINER_KEYSTORE_PASSWORD }}
+          PIPS_MINER_KEY_PASSWORD: ${{ secrets.PIPS_MINER_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in PIPS_MINER_KEYSTORE_BASE64 PIPS_MINER_KEY_ALIAS PIPS_MINER_KEYSTORE_PASSWORD PIPS_MINER_KEY_PASSWORD; do
+            [ -n "${!value}" ] || { echo "ERROR: Missing signing secret: $value"; exit 1; }
+          done
+          printf '%s' "$PIPS_MINER_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > android/app/Pips-Miner-release.jks
+          keytool -list -keystore android/app/Pips-Miner-release.jks -alias "$PIPS_MINER_KEY_ALIAS" -storepass "$PIPS_MINER_KEYSTORE_PASSWORD" >/dev/null
+          cat > android/key.properties <<EOF
+          storePassword=$PIPS_MINER_KEYSTORE_PASSWORD
+          keyPassword=$PIPS_MINER_KEY_PASSWORD
+          keyAlias=$PIPS_MINER_KEY_ALIAS
+          storeFile=app/Pips-Miner-release.jks
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path('android/app/build.gradle.kts')
+          text = path.read_text()
+          text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36', 1)
+          text = re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"', r'\1namespace = "com.example.pips_miner"', text, count=1)
+          text = re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"', r'\1applicationId = "com.example.pips_miner"', text, count=1)
+          if 'applicationId = "com.example.pips_miner"' not in text:
+              marker = text.find('defaultConfig {')
+              insert = text.find('\n', marker) + 1
+              text = text[:insert] + '        applicationId = "com.example.pips_miner"\n' + text[insert:]
+          imports = '''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
+          if 'signingPropertiesFile' not in text:
+              text = imports + text
+          if 'create("pipsMinerRelease")' not in text:
+              signing = '''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
+              text = text.replace('android {', 'android {' + signing, 1)
+          text = re.sub(r'(?m)^\s*signingConfig\s*=.*$', '            signingConfig = signingConfigs.getByName("pipsMinerRelease")', text)
+          if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
+              text = text.replace('release {', 'release {\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")', 1)
+          path.write_text(text)
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate app icons
+        run: dart run flutter_launcher_icons
+
+      - name: Analyze Flutter project
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Build release APK
+        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
+
+      - name: Prepare release APK
+        working-directory: .
+        run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pips-Miner-v1.0.${{ github.run_number }}
+          path: Pips-Miner-release.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Pips Miner v1.0.${{ github.run_number }}
+          generate_release_notes: true
+          make_latest: true
+          files: Pips-Miner-release.apk
+          token: ${{ github.token }}
