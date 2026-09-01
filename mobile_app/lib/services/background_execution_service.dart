@@ -133,33 +133,46 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
     });
   });
 
-  try {
-    // The foreground isolate must also verify Pips-Miner backend readiness
-    // because Android can start this service independently of the dashboard.
-    await api.waitUntilReady();
-    await engine.start();
+  // Backend/market-data readiness and the first reconciliation are allowed
+  // to fail transiently. Do not terminate the foreground service because of
+  // a temporary MetaApi/backend/broker-data failure. The engine's existing
+  // reconcile logic remains unchanged; we simply retry startup until it can
+  // enter its normal one-second execution loop.
+  var started = false;
+  while (!stopped && !started) {
+    try {
+      await api.waitUntilReady();
+      await engine.start();
+      started = engine.running;
 
-    if (service is AndroidServiceInstance) {
-      service.setForegroundNotificationInfo(
-        title: 'Pips Miner',
-        content: 'Trading engine is running',
-      );
+      if (started) {
+        if (service is AndroidServiceInstance) {
+          service.setForegroundNotificationInfo(
+            title: 'Pips Miner',
+            content: 'Trading engine is running',
+          );
+        }
+
+        service.invoke('engineStatus', {
+          'running': true,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Pips Miner startup/reconciliation error: $e');
+
+      service.invoke('engineError', {
+        'fatal': false,
+        'message': e.toString().replaceFirst('Exception: ', ''),
+      });
+
+      if (!stopped) {
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
     }
-
-    service.invoke('engineStatus', {
-      'running': true,
-      'timestamp': DateTime.now().toIso8601String(),
-    });
-  } catch (e) {
-    service.invoke('engineError', {
-      'fatal': true,
-      'message': e.toString().replaceFirst('Exception: ', ''),
-    });
-
-    engine.stop();
-    service.stopSelf();
-    return;
   }
+
+  if (stopped || !started) return;
 
   Timer.periodic(const Duration(seconds: 1), (timer) async {
     if (stopped || !engine.running) {
