@@ -46,8 +46,8 @@ class VelocityExpansionResult {
 }
 
 class VelocityExpansion {
-  static VelocityExpansionResult analyze({
-    required List<Candle> candles,
+  static VelocityExpansionResult analyze(
+    List<Candle> candles, {
     int baselinePeriod = 14,
     double expansionThreshold = 1.5,
     int volumeBaselinePeriod = 14,
