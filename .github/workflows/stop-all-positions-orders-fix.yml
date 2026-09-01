@@ -1,0 +1,95 @@
+name: Apply stop-all cleanup fix
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch stop cleanup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('mobile_app/lib/providers/bot_provider.dart')
+          text = path.read_text()
+          start = text.index('  /// Manual stop only closes/cancels this bot\'s own exposure.')
+          end = text.index('  void _startUpdates()', start)
+          replacement = '''  /// Manual stop is an account-wide emergency stop: close every open position
+  /// and cancel every pending order on the connected MT5 account.
+  Future<void> _liquidateAccount(MetaApiService api) async {
+    Object? lastError;
+
+    for (int attempt = 0; attempt < 3; attempt++) {
+      final positions = await api.positions();
+      final orders = await api.orders();
+
+      for (final raw in positions) {
+        if (raw is! Map) continue;
+        final position = Map<String, dynamic>.from(raw);
+        final id = position['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        try {
+          await api.closePosition(id);
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      for (final raw in orders) {
+        if (raw is! Map) continue;
+        final order = Map<String, dynamic>.from(raw);
+        final id = order['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        try {
+          await api.cancelOrder(id);
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      final remainingPositions = await api.positions();
+      final remainingOrders = await api.orders();
+
+      final hasPositions = remainingPositions.whereType<Map>().any((p) {
+        final id = p['id']?.toString();
+        return id != null && id.isNotEmpty;
+      });
+      final hasOrders = remainingOrders.whereType<Map>().any((o) {
+        final id = o['id']?.toString();
+        return id != null && id.isNotEmpty;
+      });
+
+      if (!hasPositions && !hasOrders) return;
+    }
+
+    throw Exception('Account cleanup could not be verified${lastError == null ? '' : ': $lastError'}');
+  }
+
+'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mobile_app/lib/providers/bot_provider.dart
+          git diff --cached --quiet && exit 0
+          git commit -m "Make Stop close all positions and cancel all orders"
+          git push
+      - name: Remove one-shot workflow
+        if: success()
+        run: |
+          git pull --rebase
+          git rm .github/workflows/stop-all-positions-orders-fix.yml
+          git commit -m "Remove one-shot stop cleanup workflow"
+          git push
