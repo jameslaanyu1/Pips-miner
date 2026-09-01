@@ -46,8 +46,8 @@ class VelocityExpansionResult {
 }
 
 class VelocityExpansion {
-  static VelocityExpansionResult analyze(
-    List<Candle> candles, {
+  static VelocityExpansionResult analyze({
+    required List<Candle> candles,
     int baselinePeriod = 14,
     double expansionThreshold = 1.5,
     int volumeBaselinePeriod = 14,
@@ -62,12 +62,8 @@ class VelocityExpansion {
 
     final current = candles[candles.length - 1];
     final previous = candles[candles.length - 2];
-
-    // M1 directional velocity of the newest completed candle.
     final currentVelocity = current.close - previous.close;
 
-    // Average absolute velocity of the PRECEDING baseline candles.
-    // IMPORTANT: the newest/current velocity is NOT included.
     double totalVelocity = 0;
     final baselineStart = candles.length - baselinePeriod - 1;
     final baselineEnd = candles.length - 2;
@@ -110,7 +106,7 @@ class VelocityExpansion {
     final baselineVolume = totalVolume / volumeBaselinePeriod;
     final currentVolume = current.volume;
     final volumeExpansionRatio =
-        baselineVolume > 0 ? currentVolume / baselineVolume : 0;
+        baselineVolume > 0 ? currentVolume / baselineVolume : 0.0;
     final volumeExpanded =
         baselineVolume > 0 &&
         volumeExpansionRatio >= volumeExpansionThreshold;
