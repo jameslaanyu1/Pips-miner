@@ -49,6 +49,42 @@ jobs:
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner .
 
+      - name: Configure Android build and desugaring
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path('android/app/build.gradle.kts')
+          text = path.read_text()
+
+          # Flutter 3.35.7 generates Kotlin DSL. flutter_local_notifications
+          # requires core library desugaring for its Java 8+ APIs.
+          if 'isCoreLibraryDesugaringEnabled = true' not in text:
+              match = re.search(r'(?m)^android\s*\{', text)
+              if not match:
+                  raise SystemExit('ERROR: android block not found in build.gradle.kts')
+              block_start = match.end()
+              compile_options = '''\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n        isCoreLibraryDesugaringEnabled = true\n    }\n'''
+              text = text[:block_start] + compile_options + text[block_start:]
+
+          if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in text:
+              dependency = 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n'
+              if re.search(r'(?m)^dependencies\s*\{', text):
+                  text = re.sub(r'(?m)^dependencies\s*\{', dependency, text, count=1)
+              else:
+                  text += '\n' + dependency + '}\n'
+
+          text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36', 1)
+          text = re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"', r'\1namespace = "com.example.pips_miner"', text, count=1)
+          text = re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"', r'\1applicationId = "com.example.pips_miner"', text, count=1)
+          if 'applicationId = "com.example.pips_miner"' not in text:
+              marker = text.find('defaultConfig {')
+              insert = text.find('\n', marker) + 1
+              text = text[:insert] + '        applicationId = "com.example.pips_miner"\n' + text[insert:]
+          path.write_text(text)
+          PY
+
       - name: Remove generated Flutter test
         run: rm -f test/widget_test.dart
 
@@ -114,13 +150,6 @@ jobs:
           import re
           path = Path('android/app/build.gradle.kts')
           text = path.read_text()
-          text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36', 1)
-          text = re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"', r'\1namespace = "com.example.pips_miner"', text, count=1)
-          text = re.sub(r'(?m)^(\s*)applicationId\s*=\s*"[^"]+"', r'\1applicationId = "com.example.pips_miner"', text, count=1)
-          if 'applicationId = "com.example.pips_miner"' not in text:
-              marker = text.find('defaultConfig {')
-              insert = text.find('\n', marker) + 1
-              text = text[:insert] + '        applicationId = "com.example.pips_miner"\n' + text[insert:]
           imports = '''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
           if 'signingPropertiesFile' not in text:
               text = imports + text
