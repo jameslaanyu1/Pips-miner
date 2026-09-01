@@ -87,7 +87,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       trailingPips: 100.0,
       reversalPips: 100.0,
       velocityBaselinePeriod: 14,
-      velocityExpansionThreshold: 1.5,
+      velocityExpansionThreshold: 1.0,
     );
 
     engine = VelocityReversalEngine(api: api, config: config);
