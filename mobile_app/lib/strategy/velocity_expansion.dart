@@ -30,6 +30,19 @@ class VelocityExpansionResult {
     required this.volumeExpanded,
     required this.expanded,
   });
+
+  static const VelocityExpansionResult empty = VelocityExpansionResult(
+    direction: VelocityDirection.neutral,
+    currentVelocity: 0,
+    baselineVelocity: 0,
+    expansionRatio: 0,
+    velocityExpanded: false,
+    currentVolume: 0,
+    baselineVolume: 0,
+    volumeExpansionRatio: 0,
+    volumeExpanded: false,
+    expanded: false,
+  );
 }
 
 class VelocityExpansion {
@@ -44,18 +57,7 @@ class VelocityExpansion {
         volumeBaselinePeriod <= 0 ||
         candles.length < baselinePeriod + 1 ||
         candles.length < volumeBaselinePeriod + 1) {
-      return const VelocityExpansionResult(
-        direction: VelocityDirection.neutral,
-        currentVelocity: 0,
-        baselineVelocity: 0,
-        expansionRatio: 0,
-        velocityExpanded: false,
-        currentVolume: 0,
-        baselineVolume: 0,
-        volumeExpansionRatio: 0,
-        volumeExpanded: false,
-        expanded: false,
-      );
+      return VelocityExpansionResult.empty;
     }
 
     final current = candles[candles.length - 1];
@@ -67,16 +69,6 @@ class VelocityExpansion {
     // Average absolute velocity of the PRECEDING baseline candles.
     // IMPORTANT: the newest/current velocity is NOT included.
     double totalVelocity = 0;
-
-    // The current velocity is:
-    // candles[n - 1].close - candles[n - 2].close
-    //
-    // Therefore the 14 preceding velocities are:
-    // candles[n - 16] -> candles[n - 15]
-    // ...
-    // candles[n - 3]  -> candles[n - 2]
-    //
-    // The current velocity is deliberately excluded from the baseline.
     final baselineStart = candles.length - baselinePeriod - 1;
     final baselineEnd = candles.length - 2;
 
@@ -102,44 +94,30 @@ class VelocityExpansion {
       );
     }
 
-    final expansionRatio =
-        currentVelocity.abs() / baselineVelocity;
+    final expansionRatio = currentVelocity.abs() / baselineVelocity;
+    final velocityExpanded = expansionRatio >= expansionThreshold;
 
-    final velocityExpanded =
-        expansionRatio >= expansionThreshold;
-
-    // Sequential second gate:
-    // velocity must expand first, then M1 volume must expand.
+    // Volume remains calculated for diagnostics/telemetry, but it is NO LONGER
+    // an entry gate. A velocity expansion alone is sufficient to enter.
     double totalVolume = 0;
-    final volumeStart =
-        candles.length - volumeBaselinePeriod - 1;
+    final volumeStart = candles.length - volumeBaselinePeriod - 1;
     final volumeEnd = candles.length - 2;
 
     for (int i = volumeStart; i <= volumeEnd; i++) {
       totalVolume += candles[i].volume;
     }
 
-    final baselineVolume =
-        totalVolume / volumeBaselinePeriod;
-
+    final baselineVolume = totalVolume / volumeBaselinePeriod;
     final currentVolume = current.volume;
-
-    final double volumeExpansionRatio =
-        baselineVolume > 0
-            ? currentVolume / baselineVolume
-            : 0;
-
+    final volumeExpansionRatio =
+        baselineVolume > 0 ? currentVolume / baselineVolume : 0;
     final volumeExpanded =
         baselineVolume > 0 &&
         volumeExpansionRatio >= volumeExpansionThreshold;
 
-    // BOTH gates must pass before an entry is allowed.
-    final expanded =
-        velocityExpanded && volumeExpanded;
-
     VelocityDirection direction = VelocityDirection.neutral;
 
-    if (expanded) {
+    if (velocityExpanded) {
       if (currentVelocity > 0) {
         direction = VelocityDirection.bullish;
       } else if (currentVelocity < 0) {
@@ -157,7 +135,8 @@ class VelocityExpansion {
       baselineVolume: baselineVolume,
       volumeExpansionRatio: volumeExpansionRatio,
       volumeExpanded: volumeExpanded,
-      expanded: expanded,
+      // Entry gate: VELOCITY EXPANSION ONLY.
+      expanded: velocityExpanded,
     );
   }
 }
