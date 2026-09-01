@@ -49,6 +49,9 @@ jobs:
       - name: Generate Android platform
         run: flutter create --platforms=android --project-name=pips_miner .
 
+      - name: Remove generated Flutter test
+        run: rm -f test/widget_test.dart
+
       - name: Configure Android foreground trading service
         run: |
           set -euo pipefail
