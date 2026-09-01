@@ -27,7 +27,7 @@ class TradingConfig {
     this.symbol = 'XAUUSD',
 
     this.velocityBaselinePeriod = 14,
-    this.velocityExpansionThreshold = 1.5,
+    this.velocityExpansionThreshold = 1.0,
 
     // M1 volume confirmation.
     this.volumeBaselinePeriod = 14,
