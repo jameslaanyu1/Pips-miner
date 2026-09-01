@@ -1,0 +1,91 @@
+name: Apply intrabar velocity entry fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch entry to use live price intrabar
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('mobile_app/lib/services/velocity_reversal_engine.dart')
+          s = p.read_text()
+          old = '''    if (candles.length < config.velocityBaselinePeriod + 1) {
+      return;
+    }
+
+    final positions = await api.positions();'''
+          new = '''    if (candles.length < config.velocityBaselinePeriod + 1) {
+      return;
+    }
+
+    // Intrabar entry: replace the last candle close with the live XAUUSD
+    // price so velocity is measured against the forming M1 candle instead
+    // of waiting for the candle to close.
+    final livePrice = await _liveEntryPrice();
+    if (livePrice != null && livePrice > 0) {
+      final last = candles.last;
+      candles[candles.length - 1] = Candle(
+        time: last.time,
+        open: last.open,
+        high: last.high > livePrice ? last.high : livePrice,
+        low: last.low < livePrice ? last.low : livePrice,
+        close: livePrice,
+        volume: last.volume,
+      );
+    }
+
+    final positions = await api.positions();'''
+          if old not in s:
+              raise SystemExit('Expected reconcile block not found')
+          s = s.replace(old, new, 1)
+
+          marker = '''  Future<void> _lookForInitialVelocityEntry(List<Candle> candles) async {'''
+          helper = '''  Future<double?> _liveEntryPrice() async {
+    final quote = await api.symbolPrice(config.symbol);
+
+    double? number(dynamic value) {
+      if (value is num) return value.toDouble();
+      return double.tryParse(value?.toString() ?? '');
+    }
+
+    final direct = number(quote['price'] ?? quote['currentPrice'] ?? quote['mid']);
+    if (direct != null && direct > 0) return direct;
+
+    final bid = number(quote['bid']);
+    final ask = number(quote['ask']);
+    if (bid != null && ask != null && bid > 0 && ask > 0) {
+      return (bid + ask) / 2.0;
+    }
+    return bid ?? ask;
+  }
+
+'''
+          if marker not in s:
+              raise SystemExit('Entry method marker not found')
+          s = s.replace(marker, helper + marker, 1)
+          p.write_text(s)
+          PY
+      - name: Commit source fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add mobile_app/lib/services/velocity_reversal_engine.dart
+          git diff --cached --quiet && exit 0
+          git commit -m "Make velocity entries intrabar using live price"
+          git push
+      - name: Remove one-shot workflow
+        if: always()
+        run: |
+          git rm -f .github/workflows/intrabar-entry-fix.yml || true
+          git diff --cached --quiet || (git commit -m "Remove intrabar entry fix workflow" && git push)
