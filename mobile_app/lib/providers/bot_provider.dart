@@ -188,17 +188,29 @@ class BotProvider extends ChangeNotifier {
     return 'Pips-Miner connection failed: $message';
   }
 
+  /// Start does not reconnect MT5, call accountInformation(), or wait for
+  /// account readiness. The MT5/MetaApi session must already exist. The
+  /// background trading isolate will query market data and begin scanning.
   Future<void> startBot() async {
-    if (!_isConnected || _api == null) await connect();
-    if (!_isConnected || _api == null) throw Exception('MT5 is not connected. Connect the account first.');
     _engineError = null;
-    await _api!.waitUntilReady();
+
+    final sessionToken = await _storage.getPipsMinerSessionToken();
+    final accountId = await _storage.getPipsMinerAccountId();
+
+    if (sessionToken == null || sessionToken.trim().isEmpty || accountId == null || accountId.trim().isEmpty) {
+      throw Exception('MT5 account is not connected. Connect the account first.');
+    }
+
+    _api = MetaApiService(token: sessionToken.trim(), accountId: accountId.trim());
+    _isConnected = true;
+
     final service = FlutterBackgroundService();
     final alreadyRunning = await service.isRunning();
     if (!alreadyRunning) {
       final started = await service.startService();
       if (!started) throw Exception('Pips Miner background trading service could not start.');
     }
+
     _isBotRunning = true;
     _startUpdates();
     notifyListeners();
@@ -208,6 +220,7 @@ class BotProvider extends ChangeNotifier {
     _engineError = null;
     _updateTimer?.cancel();
     final service = FlutterBackgroundService();
+
     if (await service.isRunning()) {
       service.invoke('stopService');
       for (int attempt = 0; attempt < 30; attempt++) {
@@ -215,14 +228,24 @@ class BotProvider extends ChangeNotifier {
         if (!await service.isRunning()) break;
       }
     }
-    if (_api == null) await connect();
+
+    if (_api == null) {
+      final sessionToken = await _storage.getPipsMinerSessionToken();
+      final accountId = await _storage.getPipsMinerAccountId();
+      if (sessionToken != null && sessionToken.trim().isNotEmpty && accountId != null && accountId.trim().isNotEmpty) {
+        _api = MetaApiService(token: sessionToken.trim(), accountId: accountId.trim());
+        _isConnected = true;
+      }
+    }
+
     final api = _api;
-    if (api == null || !_isConnected) {
+    if (api == null) {
       _isBotRunning = false;
-      _engineError = 'Miner stopped, but the server session is unavailable to verify or close account orders.';
+      _engineError = 'Miner stopped, but no trading session is available to verify Pips Miner cleanup.';
       notifyListeners();
       return;
     }
+
     try {
       await _liquidateAccount(api);
       _isBotRunning = false;
@@ -230,38 +253,65 @@ class BotProvider extends ChangeNotifier {
       await _fetchBotStatus();
     } catch (e) {
       _isBotRunning = false;
-      _engineError = 'Miner stopped, but account cleanup was incomplete: $e';
+      _engineError = 'Miner stopped, but Pips Miner cleanup was incomplete: $e';
     }
     notifyListeners();
   }
 
+  /// Manual stop only closes/cancels this bot's own exposure. It must never
+  /// liquidate unrelated positions or pending orders on the MT5 account.
   Future<void> _liquidateAccount(MetaApiService api) async {
     Object? lastError;
+
     for (int attempt = 0; attempt < 3; attempt++) {
       final positions = await api.positions();
       final orders = await api.orders();
+
       for (final raw in positions) {
         if (raw is! Map) continue;
         final position = Map<String, dynamic>.from(raw);
+        final symbol = position['symbol']?.toString()?.toUpperCase();
+        final clientId = position['clientId']?.toString().toUpperCase() ?? '';
+        final magic = position['magic']?.toString() ?? '';
+        if (symbol != _symbol || !(clientId.startsWith('PIPSMINER') || magic == '26081501')) continue;
+
         final id = position['id']?.toString();
         if (id == null || id.isEmpty) continue;
         try { await api.closePosition(id); } catch (e) { lastError = e; }
       }
+
       for (final raw in orders) {
         if (raw is! Map) continue;
         final order = Map<String, dynamic>.from(raw);
+        final symbol = order['symbol']?.toString()?.toUpperCase();
+        final clientId = (order['clientId'] ?? order['client_id'] ?? order['comment'])?.toString().toUpperCase() ?? '';
+        final magic = order['magic']?.toString() ?? '';
+        if (symbol != _symbol || !(clientId.startsWith('PIPSMINER') || magic == '26081501')) continue;
+
         final id = order['id']?.toString();
         if (id == null || id.isEmpty) continue;
         try { await api.cancelOrder(id); } catch (e) { lastError = e; }
       }
+
       await Future<void>.delayed(const Duration(milliseconds: 500));
+
       final remainingPositions = await api.positions();
       final remainingOrders = await api.orders();
-      if (remainingPositions.isEmpty && remainingOrders.isEmpty) return;
+      final hasManagedExposure = remainingPositions.whereType<Map>().any((p) {
+        final m = Map<String, dynamic>.from(p);
+        return m['symbol']?.toString()?.toUpperCase() == _symbol &&
+            ((m['clientId']?.toString().toUpperCase() ?? '').startsWith('PIPSMINER') || m['magic']?.toString() == '26081501');
+      });
+      final hasManagedOrders = remainingOrders.whereType<Map>().any((o) {
+        final m = Map<String, dynamic>.from(o);
+        return m['symbol']?.toString()?.toUpperCase() == _symbol &&
+            (((m['clientId'] ?? m['client_id'] ?? m['comment'])?.toString().toUpperCase() ?? '').startsWith('PIPSMINER') || m['magic']?.toString() == '26081501');
+      });
+
+      if (!hasManagedExposure && !hasManagedOrders) return;
     }
-    final remainingPositions = await api.positions();
-    final remainingOrders = await api.orders();
-    if (remainingPositions.isNotEmpty || remainingOrders.isNotEmpty) throw Exception('remaining positions=${remainingPositions.length}, pending orders=${remainingOrders.length}${lastError == null ? '' : '; last error: $lastError'}');
+
+    throw Exception('Pips Miner cleanup could not be verified${lastError == null ? '' : ': $lastError'}');
   }
 
   void _startUpdates() {
@@ -278,7 +328,7 @@ class BotProvider extends ChangeNotifier {
 
       final orders = await api.orders();
       final strategyOrders = orders.whereType<Map>().map((o) => Map<String, dynamic>.from(o)).where((o) {
-        final symbol = o['symbol']?.toString()?.toUpperCase();
+        final symbol = o['symbol']?.toString().toUpperCase();
         final clientId = (o['clientId'] ?? o['client_id'] ?? o['comment'])?.toString().toUpperCase() ?? '';
         final magic = o['magic']?.toString() ?? '';
         return symbol == _symbol && (clientId.contains('PIPSMINER') || magic == '26081501');
