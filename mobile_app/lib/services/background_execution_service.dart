@@ -86,7 +86,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       symbol: symbol,
       trailingPips: 100.0,
       reversalPips: 100.0,
-      velocityBaselinePeriod: 14,
+      velocityBaselinePeriod: 5,
       velocityExpansionThreshold: 1.0,
     );
 
@@ -126,9 +126,6 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       'message': 'Network connection lost. Trading stopped; protecting active Pips Miner positions and orders.',
     });
 
-    // If the network is completely down, cleanup cannot be sent to MetaApi.
-    // Keep this foreground service alive without trading and retry until the
-    // connection returns. Shutdown occurs only after cleanup is verified.
     while (!stopped) {
       try {
         await engine.cleanupManagedExposure();
@@ -146,8 +143,6 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
   }
 
   try {
-    // Start queries market data only. The existing authenticated account
-    // session is reused; there is no account readiness/reconnection wait.
     await api.candles(config.symbol, timeframe: '1m', limit: 100);
     await engine.start();
   } catch (e) {
@@ -156,8 +151,6 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
       return;
     }
 
-    // Non-network problems do not turn the bot off. Start the engine and let
-    // its normal one-second loop retry market data on subsequent cycles.
     service.invoke('engineError', {
       'fatal': false,
       'message': e.toString().replaceFirst('Exception: ', ''),
