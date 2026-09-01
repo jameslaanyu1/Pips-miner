@@ -29,10 +29,6 @@ class AppUpdateService {
   AppUpdateService._();
   static final AppUpdateService instance = AppUpdateService._();
 
-  // Do not use api.github.com for routine update checks. Unauthenticated REST
-  // API calls are limited to 60 requests/hour per originating IP and can return
-  // HTTP 403 when that shared limit is exhausted. A small public manifest on
-  // raw.githubusercontent.com is much more reliable for installed apps.
   static const _updateManifestUrl =
       'https://raw.githubusercontent.com/jameslaanyu1/Pips-miner/main/update.json';
   static const _expectedAppName = 'Pips-Miner';
@@ -42,8 +38,25 @@ class AppUpdateService {
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(minutes: 10),
     sendTimeout: const Duration(seconds: 15),
-    headers: const {'User-Agent': 'Pips-Miner-Android-Updater', 'Accept': 'application/json'},
+    headers: const {
+      'User-Agent': 'Pips-Miner-Android-Updater',
+      'Accept': 'application/json',
+    },
   ));
+
+  // Use a separate client for the APK itself. GitHub redirects release assets
+  // to a CDN, so the updater must accept binary APK content rather than the
+  // JSON Accept header used by the manifest client.
+  final Dio _apkClient = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(minutes: 15),
+    sendTimeout: const Duration(seconds: 20),
+    headers: const {
+      'User-Agent': 'Pips-Miner-Android-Updater',
+      'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*',
+    },
+  ));
+
   final FlutterAppInstaller _installer = FlutterAppInstaller();
 
   Future<AppUpdateInfo?> checkForUpdate() async => (await checkForUpdateDetailed()).update;
@@ -119,15 +132,23 @@ class AppUpdateService {
         final installed = await _installer.installApk(filePath: apkFile.path);
         if (!installed && context.mounted) await _showMessage(context, 'Installation could not start', 'Android could not open the downloaded $_expectedApk file.');
       }
-    } catch (_) {
-      if (context.mounted) await _showMessage(context, 'Update download failed', 'The $_expectedAppName update could not be downloaded. Please try again.');
+    } on DioException catch (e) {
+      if (context.mounted) {
+        final status = e.response?.statusCode;
+        final detail = e.message ?? e.type.toString();
+        await _showMessage(context, 'Update download failed', 'Could not download $_expectedAppName ${update.version}${status != null ? ' (HTTP $status)' : ''}. $detail');
+      }
+    } catch (e) {
+      if (context.mounted) await _showMessage(context, 'Update download failed', 'The $_expectedAppName update could not be downloaded. $e');
     }
     return result;
   }
 
   Future<File> _downloadApk(BuildContext context, AppUpdateInfo update) async {
-    final directory = await getExternalStorageDirectory();
-    if (directory == null) throw StateError('Android app storage is unavailable.');
+    // Cache storage is app-private and avoids Android external-storage path
+    // restrictions while still producing a normal local APK file for the
+    // installer plugin.
+    final directory = await getTemporaryDirectory();
     final file = File('${directory.path}/$_expectedAppName-${update.version}.apk');
     if (await file.exists()) await file.delete();
 
@@ -137,8 +158,33 @@ class AppUpdateService {
       content: Column(mainAxisSize: MainAxisSize.min, children: [LinearProgressIndicator(value: value > 0 ? value : null), const SizedBox(height: 12), Text(value > 0 ? '${(value * 100).round()}%' : 'Starting download…')]),
     )));
     try {
-      await _downloadClient.download(update.downloadUrl, file.path, onReceiveProgress: (received, total) { if (total > 0) progress.value = received / total; }, options: Options(responseType: ResponseType.bytes, followRedirects: true, maxRedirects: 8, validateStatus: (status) => status != null && status >= 200 && status < 400));
-      if (!await file.exists() || await file.length() < 1024) throw StateError('Downloaded APK is empty or incomplete.');
+      await _apkClient.download(
+        update.downloadUrl,
+        file.path,
+        onReceiveProgress: (received, total) {
+          if (total > 0) progress.value = received / total;
+        },
+        options: Options(
+          responseType: ResponseType.bytes,
+          followRedirects: true,
+          maxRedirects: 8,
+          validateStatus: (status) => status != null && status >= 200 && status < 400,
+        ),
+      );
+
+      if (!await file.exists()) throw StateError('Downloaded APK file was not created.');
+      final length = await file.length();
+      if (length < 1024) throw StateError('Downloaded APK is empty or incomplete.');
+
+      // An Android APK is a ZIP archive. This prevents installing an HTML or
+      // error response that happened to be saved with an .apk extension.
+      final handle = await file.open();
+      final header = await handle.read(4);
+      await handle.close();
+      if (header.length < 4 || header[0] != 0x50 || header[1] != 0x4b || header[2] != 0x03 || header[3] != 0x04) {
+        throw StateError('Downloaded file is not a valid APK.');
+      }
+
       progress.value = 1;
       return file;
     } finally {
