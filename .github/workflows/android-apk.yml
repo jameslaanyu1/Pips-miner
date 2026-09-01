@@ -58,8 +58,6 @@ jobs:
           path = Path('android/app/build.gradle.kts')
           text = path.read_text()
 
-          # Flutter 3.35.7 generates Kotlin DSL. flutter_local_notifications
-          # requires core library desugaring for its Java 8+ APIs.
           if 'isCoreLibraryDesugaringEnabled = true' not in text:
               match = re.search(r'(?m)^android\s*\{', text)
               if not match:
@@ -105,15 +103,31 @@ jobs:
               name = permission.split('name="', 1)[1].split('"', 1)[0]
               if name not in text:
                   text = text.replace('<application', permission + '\n\n    <application', 1)
-          service = '''        <service
+
+          # The flutter_background_service plugin declares this service as exported=true.
+          # Explicitly replace that attribute in the app manifest so the merger has one value.
+          if 'xmlns:tools=' not in text:
+              text = text.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ', 1)
+
+          service_name = 'id.flutter.flutter_background_service.BackgroundService'
+          if service_name in text:
+              import re
+              text = re.sub(
+                  r'(<service\s+android:name="' + re.escape(service_name) + r'"[^>]*?)android:exported="[^"]+"([^>]*>)',
+                  r'\1android:exported="true" tools:replace="android:exported"\2',
+                  text,
+                  count=1,
+              )
+          else:
+              service = '''        <service
               android:name="id.flutter.flutter_background_service.BackgroundService"
-              android:exported="false"
-              android:foregroundServiceType="specialUse">
+              android:exported="true"
+              android:foregroundServiceType="specialUse"
+              tools:replace="android:exported">
               <property
                   android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                   android:value="User-initiated foreground trading engine for monitoring and managing the connected MT5 trading account." />
           </service>'''
-          if 'id.flutter.flutter_background_service.BackgroundService' not in text:
               text = text.replace('    </application>', service + '\n    </application>', 1)
           path.write_text(text)
           PY
