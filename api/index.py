@@ -71,12 +71,16 @@ backend_app.meta_raw = _region_aware_meta_raw
 
 
 def _update_account_with_provisioning_token(account_id, login, password, server):
-    """Update an existing MetaApi account without using its configuration token.
+    """Refresh an existing account when the provisioning token has update access.
 
-    MetaApi's /credentials endpoint expects an account-specific configuration
-    token. Pips-Miner instead authenticates as the administrator/provisioning
-    user, so the supported endpoint for changing an existing account's
-    password/server is PUT /users/current/accounts/:accountId.
+    MetaApi's /credentials endpoint requires an account-specific configuration
+    token. The provisioning account endpoint can also update credentials, but
+    only when the administrator token has the updateAccount permission.
+
+    If that permission is unavailable, the account is left untouched so the
+    normal connect flow can reuse an already-configured/deployed account. This
+    avoids converting a valid existing account into a hard failure merely
+    because the administrator token is restricted.
     """
     account_response = _ORIGINAL_META_RAW(
         "GET",
@@ -107,17 +111,27 @@ def _update_account_with_provisioning_token(account_id, login, password, server)
         },
     )
 
-    if response.status_code not in (200, 204):
-        body = backend_app.response_body(response)
-        raise RuntimeError(
-            f"MetaApi account update failed ({response.status_code}): {body}"
-        )
+    if response.status_code in (200, 204):
+        return
+
+    if response.status_code == 403:
+        # The current MetaApi token is valid for account reads but does not
+        # include updateAccount. Reuse the existing account and let the
+        # downstream provisioning/status check determine whether it is already
+        # configured and deployed.
+        return
+
+    body = backend_app.response_body(response)
+    raise RuntimeError(
+        f"MetaApi account update failed ({response.status_code}): {body}"
+    )
 
 
 # The old backend called PUT /credentials, whose auth-token is explicitly a
 # configuration token. That caused the production error:
 # "Configuration token does not match the account id".
-# Use the administrator-authenticated account update endpoint instead.
+# Prefer the administrator endpoint; if that token is read/deploy-only, reuse
+# the existing account instead of failing before its current state is checked.
 backend_app.update_existing_credentials = _update_account_with_provisioning_token
 
 
