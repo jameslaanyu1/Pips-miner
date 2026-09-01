@@ -23,6 +23,7 @@ _ACCOUNT_PATH_PATTERN = re.compile(r"/users/current/accounts/([^/]+)")
 _REGION_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _ACCOUNT_REGIONS = {}
 _ORIGINAL_META_RAW = backend_app.meta_raw
+_ORIGINAL_UPDATE_CREDENTIALS = backend_app.update_existing_credentials
 
 
 def _region_aware_meta_raw(method, base_url, path="", **kwargs):
@@ -67,6 +68,57 @@ def _region_aware_meta_raw(method, base_url, path="", **kwargs):
 # backend.app routes resolve meta_raw from that module at request time. This
 # makes both /api/v1/connect and authenticated trading requests region-aware.
 backend_app.meta_raw = _region_aware_meta_raw
+
+
+def _update_account_with_provisioning_token(account_id, login, password, server):
+    """Update an existing MetaApi account without using its configuration token.
+
+    MetaApi's /credentials endpoint expects an account-specific configuration
+    token. Pips-Miner instead authenticates as the administrator/provisioning
+    user, so the supported endpoint for changing an existing account's
+    password/server is PUT /users/current/accounts/:accountId.
+    """
+    account_response = _ORIGINAL_META_RAW(
+        "GET",
+        backend_app.METAAPI_PROVISIONING_URL,
+        f"/users/current/accounts/{account_id}",
+    )
+    if account_response.status_code != 200:
+        raise RuntimeError(
+            f"MetaApi account lookup failed before credential update "
+            f"({account_response.status_code}): "
+            f"{backend_app.response_body(account_response)}"
+        )
+
+    try:
+        account = account_response.json()
+    except ValueError:
+        account = {}
+
+    name = str(account.get("name") or f"Pips-Miner-{login}").strip()
+    response = _ORIGINAL_META_RAW(
+        "PUT",
+        backend_app.METAAPI_PROVISIONING_URL,
+        f"/users/current/accounts/{account_id}",
+        json={
+            "password": password,
+            "name": name,
+            "server": server,
+        },
+    )
+
+    if response.status_code not in (200, 204):
+        body = backend_app.response_body(response)
+        raise RuntimeError(
+            f"MetaApi account update failed ({response.status_code}): {body}"
+        )
+
+
+# The old backend called PUT /credentials, whose auth-token is explicitly a
+# configuration token. That caused the production error:
+# "Configuration token does not match the account id".
+# Use the administrator-authenticated account update endpoint instead.
+backend_app.update_existing_credentials = _update_account_with_provisioning_token
 
 
 @app.get("/api/update")
