@@ -6,10 +6,12 @@ This module exposes the existing Flask control API through Vercel and provides
 public release metadata for the Android updater.
 """
 
+import asyncio
 import re
 
 import requests
 from flask import jsonify, request
+from metaapi_cloud_sdk import MetaApi
 
 import backend.app as backend_app
 from backend.app import app, meta_request, require_session
@@ -65,25 +67,14 @@ def _region_aware_meta_raw(method, base_url, path="", **kwargs):
     return _ORIGINAL_META_RAW(method, base_url, path, **kwargs)
 
 
-# backend.app routes resolve meta_raw from that module at request time. This
-# makes both /api/v1/connect and authenticated trading requests region-aware.
 backend_app.meta_raw = _region_aware_meta_raw
 
 
 def _update_account_with_provisioning_token(account_id, login, password, server):
-    """Legacy compatibility hook.
-
-    Existing accounts are now reused without attempting to change credentials.
-    The administrator token does not have to be a configuration token, and
-    MetaApi's /credentials endpoint explicitly requires an account-specific
-    configuration token. The MT5 password is therefore never overwritten here.
-    """
+    """Legacy compatibility hook: existing accounts are never mutated here."""
     return
 
 
-# The old backend called PUT /credentials, whose auth-token is explicitly a
-# configuration token. That caused the production error:
-# "Configuration token does not match the account id".
 backend_app.update_existing_credentials = _update_account_with_provisioning_token
 
 
@@ -103,20 +94,11 @@ def _reuse_existing_account(login, password, server, platform):
     return account_id, "reused"
 
 
-# The backend's original create_metaapi_account function attempted to refresh
-# credentials on every login. That is unsafe for accounts configured with a
-# MetaApi configuration token and is unnecessary for an already-provisioned
-# account. Resolve the existing account and inspect its live state instead.
 backend_app.create_metaapi_account = _reuse_existing_account
 
 
 def _deploy_only_when_undeployed(account_id):
-    """Do not call deployAccount for accounts that are already deployed.
-
-    The current MetaApi administrator token lacks deployAccount permission. A
-    deployed account can still be reused and polled for broker connectivity.
-    Only an actually undeployed account needs a provisioning/deployment action.
-    """
+    """Do not call deployAccount for accounts that are already deployed."""
     status = backend_app.provisioning_account(account_id)
     state = str(status.get("state", "")).upper()
 
@@ -211,18 +193,55 @@ def app_update():
 @app.get("/api/v1/symbols")
 @require_session
 def account_symbols(session):
-    """Return the symbols actually exposed by the user's connected MT account.
-
-    The account ID comes from the authenticated Pips-Miner session, so symbol
-    discovery is broker/account specific rather than a hard-coded global list.
-    An optional `search` parameter is applied locally to the returned symbol
-    names to keep the MetaApi symbols call deterministic and inexpensive for
-    the mobile selector.
-    """
+    """Return the symbols exposed by the user's connected MT account."""
     try:
         result = meta_request("GET", session["account_id"], "/symbols")
         return result
     except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+
+@app.get("/api/v1/stream-token")
+@require_session
+def stream_token(session):
+    """Issue a least-privilege MetaApi token for direct market streaming.
+
+    The mobile app never receives the administrator MetaApi token. The token
+    is restricted to the authenticated account and read-only streaming access.
+    Trading continues through the authenticated Pips-Miner trade API.
+    """
+    account_id = str(session.get("account_id", "")).strip()
+    if not account_id:
+        return jsonify({"ok": False, "error": "Trading account is missing from session."}), 401
+
+    try:
+        async def create_stream_token():
+            api = MetaApi(backend_app.METAAPI_TOKEN)
+            try:
+                return await api.token_management_api.narrow_down_token(
+                    {
+                        "applications": ["metaapi-real-time-streaming-api"],
+                        "roles": ["reader"],
+                        "resources": [{"entity": "account", "id": account_id}],
+                    },
+                    24,
+                )
+            finally:
+                try:
+                    await api.close()
+                except Exception:
+                    pass
+
+        token = asyncio.run(create_stream_token())
+        return jsonify({
+            "ok": True,
+            "accountId": account_id,
+            "token": token,
+            "expiresInHours": 24,
+            "streaming": True,
+        })
+    except Exception as exc:
+        app.logger.exception("MetaApi streaming token generation failed")
         return jsonify({"ok": False, "error": str(exc)}), 502
 
 
