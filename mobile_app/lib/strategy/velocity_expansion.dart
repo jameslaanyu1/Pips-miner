@@ -52,6 +52,7 @@ class VelocityExpansion {
     double expansionThreshold = 1.0,
     int volumeBaselinePeriod = 14,
     double volumeExpansionThreshold = 1.5,
+    double? livePrice,
   }) {
     if (baselinePeriod <= 0 ||
         volumeBaselinePeriod <= 0 ||
@@ -60,9 +61,41 @@ class VelocityExpansion {
       return VelocityExpansionResult.empty;
     }
 
-    final current = candles[candles.length - 1];
     final previous = candles[candles.length - 2];
-    final currentVelocity = current.close - previous.close;
+    final sourceCurrent = candles[candles.length - 1];
+
+    final now = DateTime.now().toUtc();
+    final currentMinute = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      now.minute,
+    );
+    final sourceMinute = DateTime.utc(
+      sourceCurrent.time.year,
+      sourceCurrent.time.month,
+      sourceCurrent.time.day,
+      sourceCurrent.time.hour,
+      sourceCurrent.time.minute,
+    );
+
+    final formingOpen = sourceMinute == currentMinute
+        ? sourceCurrent.open
+        : previous.close;
+    final effectiveClose = livePrice ?? sourceCurrent.close;
+    final effectiveHigh = livePrice == null
+        ? sourceCurrent.high
+        : (sourceMinute == currentMinute
+            ? [sourceCurrent.high, livePrice].reduce((a, b) => a > b ? a : b)
+            : [formingOpen, livePrice].reduce((a, b) => a > b ? a : b));
+    final effectiveLow = livePrice == null
+        ? sourceCurrent.low
+        : (sourceMinute == currentMinute
+            ? [sourceCurrent.low, livePrice].reduce((a, b) => a < b ? a : b)
+            : [formingOpen, livePrice].reduce((a, b) => a < b ? a : b));
+
+    final currentVelocity = effectiveClose - previous.close;
 
     double totalVelocity = 0;
     final baselineStart = candles.length - baselinePeriod - 1;
@@ -80,9 +113,6 @@ class VelocityExpansion {
     final velocityExpanded =
         baselineVelocity > 0 && expansionRatio > expansionThreshold;
 
-    // New entry gate: intrabar M1 volatility expansion against the prior
-    // two completed candles. The forming candle's high/low is used so the
-    // detector can react before the M1 candle closes.
     const volatilityBaselinePeriod = 2;
     final volatilityStart = candles.length - volatilityBaselinePeriod - 1;
     final volatilityEnd = candles.length - 2;
@@ -93,44 +123,20 @@ class VelocityExpansion {
     }
 
     final baselineRange = totalRange / volatilityBaselinePeriod;
-    final currentRange = (current.high - current.low).abs();
+    final currentRange = (effectiveHigh - effectiveLow).abs();
     final volatilityRatio =
         baselineRange > 0 ? currentRange / baselineRange : 0.0;
     final volatilityExpanded =
         baselineRange > 0 && volatilityRatio > 1.0;
 
     VelocityDirection direction = VelocityDirection.neutral;
-
-    if (velocityExpanded) {
-      if (currentVelocity > 0) {
-        direction = VelocityDirection.bullish;
-      } else if (currentVelocity < 0) {
-        direction = VelocityDirection.bearish;
-      }
+    if (currentVelocity > 0 && (velocityExpanded || volatilityExpanded)) {
+      direction = VelocityDirection.bullish;
+    } else if (currentVelocity < 0 &&
+        (velocityExpanded || volatilityExpanded)) {
+      direction = VelocityDirection.bearish;
     }
 
-    // If velocity did not trigger, volatility expansion alone can trigger
-    // an entry. Direction comes from the forming candle's live movement.
-    if (direction == VelocityDirection.neutral && volatilityExpanded) {
-      final upwardMove = current.high - current.open;
-      final downwardMove = current.open - current.low;
-
-      if (upwardMove > downwardMove && upwardMove > 0) {
-        direction = VelocityDirection.bullish;
-      } else if (downwardMove > upwardMove && downwardMove > 0) {
-        direction = VelocityDirection.bearish;
-      } else if (current.close > current.open) {
-        direction = VelocityDirection.bullish;
-      } else if (current.close < current.open) {
-        direction = VelocityDirection.bearish;
-      } else if (current.close > previous.close) {
-        direction = VelocityDirection.bullish;
-      } else if (current.close < previous.close) {
-        direction = VelocityDirection.bearish;
-      }
-    }
-
-    // Volume remains diagnostic only and is not an entry requirement.
     double totalVolume = 0;
     final volumeStart = candles.length - volumeBaselinePeriod - 1;
     final volumeEnd = candles.length - 2;
@@ -140,7 +146,7 @@ class VelocityExpansion {
     }
 
     final baselineVolume = totalVolume / volumeBaselinePeriod;
-    final currentVolume = current.volume;
+    final currentVolume = sourceCurrent.volume;
     final volumeExpansionRatio =
         baselineVolume > 0 ? currentVolume / baselineVolume : 0.0;
     final volumeExpanded =
@@ -157,7 +163,6 @@ class VelocityExpansion {
       baselineVolume: baselineVolume,
       volumeExpansionRatio: volumeExpansionRatio,
       volumeExpanded: volumeExpanded,
-      // Entry gate: velocity expansion OR 2-candle volatility expansion.
       expanded: velocityExpanded || volatilityExpanded,
     );
   }
