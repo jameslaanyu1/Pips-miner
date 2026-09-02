@@ -3,8 +3,6 @@ name: Volatility Entry Fix
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/volatility-entry-fix.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,33 +20,20 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
-          root = Path('mobile_app')
-          config = root / 'lib/models/trading_config.dart'
-          engine = root / 'lib/services/velocity_reversal_engine.dart'
-          strategy = root / 'lib/strategy/volatility_expansion.dart'
-
-          c = config.read_text()
-          old = """  // Volume confirmation follows velocity expansion.\n  final int volumeBaselinePeriod;\n  final double volumeExpansionThreshold;\n"""
-          new = """  // Volume confirmation follows velocity expansion.\n  final int volumeBaselinePeriod;\n  final double volumeExpansionThreshold;\n\n  // Volatility-expansion entry uses the two preceding completed M1 candles\n  // as its range baseline.\n  final int volatilityBaselinePeriod;\n  final double volatilityExpansionThreshold;\n"""
-          if old not in c:
-              raise SystemExit('TradingConfig field anchor not found')
-          c = c.replace(old, new, 1)
-
-          old = """    // M1 volume confirmation.\n    this.volumeBaselinePeriod = 14,\n    this.volumeExpansionThreshold = 1.5,\n\n    // AGREED: 100 pips.\n"""
-          new = """    // M1 volume confirmation.\n    this.volumeBaselinePeriod = 14,\n    this.volumeExpansionThreshold = 1.5,\n\n    // Volatility entry: compare the forming M1 candle with the prior 2.\n    this.volatilityBaselinePeriod = 2,\n    this.volatilityExpansionThreshold = 1.0,\n\n    // AGREED: 100 pips.\n"""
-          if old not in c:
-              raise SystemExit('TradingConfig constructor anchor not found')
-          c = c.replace(old, new, 1)
+          root=Path('mobile_app')
+          config=root/'lib/models/trading_config.dart'
+          engine=root/'lib/services/velocity_reversal_engine.dart'
+          strategy=root/'lib/strategy/volatility_expansion.dart'
+          c=config.read_text()
+          if 'final int volatilityBaselinePeriod;' not in c:
+            c=c.replace('  final double volumeExpansionThreshold;\n','  final double volumeExpansionThreshold;\n\n  final int volatilityBaselinePeriod;\n  final double volatilityExpansionThreshold;\n',1)
+          if 'this.volatilityBaselinePeriod = 2' not in c:
+            c=c.replace('    this.volumeExpansionThreshold = 1.5,\n','    this.volumeExpansionThreshold = 1.5,\n\n    this.volatilityBaselinePeriod = 2,\n    this.volatilityExpansionThreshold = 1.0,\n',1)
           config.write_text(c)
+          if not strategy.exists():
+            strategy.write_text("""import '../models/candle.dart';
 
-          strategy.write_text(r'''import '../models/candle.dart';
-
-enum VolatilityDirection {
-  bullish,
-  bearish,
-  neutral,
-}
+enum VolatilityDirection { bullish, bearish, neutral }
 
 class VolatilityExpansionResult {
   final VolatilityDirection direction;
@@ -56,145 +41,99 @@ class VolatilityExpansionResult {
   final double baselineRange;
   final double expansionRatio;
   final bool expanded;
-
-  const VolatilityExpansionResult({
-    required this.direction,
-    required this.currentRange,
-    required this.baselineRange,
-    required this.expansionRatio,
-    required this.expanded,
-  });
-
-  static const empty = VolatilityExpansionResult(
-    direction: VolatilityDirection.neutral,
-    currentRange: 0,
-    baselineRange: 0,
-    expansionRatio: 0,
-    expanded: false,
-  );
+  const VolatilityExpansionResult({required this.direction,required this.currentRange,required this.baselineRange,required this.expansionRatio,required this.expanded});
+  static const empty=VolatilityExpansionResult(direction:VolatilityDirection.neutral,currentRange:0,baselineRange:0,expansionRatio:0,expanded:false);
 }
 
 class VolatilityExpansion {
-  static VolatilityExpansionResult analyze(
-    List<Candle> candles, {
-    int baselinePeriod = 2,
-    double expansionThreshold = 1.0,
-  }) {
-    if (baselinePeriod <= 0 || candles.length < baselinePeriod + 1) {
-      return VolatilityExpansionResult.empty;
+  static VolatilityExpansionResult analyze(List<Candle> candles,{int baselinePeriod=2,double expansionThreshold=1.0}) {
+    if(baselinePeriod<=0||candles.length<baselinePeriod+1)return VolatilityExpansionResult.empty;
+    final current=candles[candles.length-1];
+    final previous=candles[candles.length-2];
+    final start=candles.length-baselinePeriod-1;
+    final end=candles.length-2;
+    var total=0.0;
+    for(int i=start;i<=end;i++) total+=(candles[i].high-candles[i].low).abs();
+    final baseline=total/baselinePeriod;
+    final currentRange=(current.high-current.low).abs();
+    if(baseline<=0)return VolatilityExpansionResult(direction:VolatilityDirection.neutral,currentRange:currentRange,baselineRange:baseline,expansionRatio:0,expanded:false);
+    final ratio=currentRange/baseline;
+    final expanded=ratio>expansionThreshold;
+    var direction=VolatilityDirection.neutral;
+    if(expanded){
+      if(current.close>current.open)direction=VolatilityDirection.bullish;
+      else if(current.close<current.open)direction=VolatilityDirection.bearish;
+      else if(current.close>previous.close)direction=VolatilityDirection.bullish;
+      else if(current.close<previous.close)direction=VolatilityDirection.bearish;
     }
-
-    final current = candles[candles.length - 1];
-    final previous = candles[candles.length - 2];
-
-    // Compare the forming candle's live range against only the preceding
-    // completed candles. This keeps the baseline from moving with the signal.
-    final baselineStart = candles.length - baselinePeriod - 1;
-    final baselineEnd = candles.length - 2;
-    var totalRange = 0.0;
-
-    for (int i = baselineStart; i <= baselineEnd; i++) {
-      final candle = candles[i];
-      totalRange += (candle.high - candle.low).abs();
-    }
-
-    final baselineRange = totalRange / baselinePeriod;
-    final currentRange = (current.high - current.low).abs();
-
-    if (baselineRange <= 0) {
-      return VolatilityExpansionResult(
-        direction: VolatilityDirection.neutral,
-        currentRange: currentRange,
-        baselineRange: baselineRange,
-        expansionRatio: 0,
-        expanded: false,
-      );
-    }
-
-    final expansionRatio = currentRange / baselineRange;
-    final expanded = expansionRatio > expansionThreshold;
-
-    var direction = VolatilityDirection.neutral;
-    if (expanded) {
-      if (current.close > current.open) {
-        direction = VolatilityDirection.bullish;
-      } else if (current.close < current.open) {
-        direction = VolatilityDirection.bearish;
-      } else if (current.close > previous.close) {
-        direction = VolatilityDirection.bullish;
-      } else if (current.close < previous.close) {
-        direction = VolatilityDirection.bearish;
-      }
-    }
-
-    return VolatilityExpansionResult(
-      direction: direction,
-      currentRange: currentRange,
-      baselineRange: baselineRange,
-      expansionRatio: expansionRatio,
-      expanded: expanded,
-    );
+    return VolatilityExpansionResult(direction:direction,currentRange:currentRange,baselineRange:baseline,expansionRatio:ratio,expanded:expanded);
   }
 }
-''')
+""")
+          e=engine.read_text()
+          if "../strategy/volatility_expansion.dart" not in e:
+            e=e.replace("import '../strategy/velocity_expansion.dart';\n","import '../strategy/velocity_expansion.dart';\nimport '../strategy/volatility_expansion.dart';\n",1)
+          if 'final livePrice = await _liveEntryPrice();' not in e:
+            e=e.replace("    if (candles.length < config.velocityBaselinePeriod + 1) {\n      return;\n    }\n\n    final positions = await api.positions();\n", "    if (candles.length < config.velocityBaselinePeriod + 1) {\n      return;\n    }\n\n    final livePrice = await _liveEntryPrice();\n    if (livePrice != null && livePrice > 0) {\n      final last = candles.last;\n      candles[candles.length - 1] = Candle(time: last.time, open: last.open, high: last.high > livePrice ? last.high : livePrice, low: last.low < livePrice ? last.low : livePrice, close: livePrice, volume: last.volume);\n    }\n\n    final positions = await api.positions();\n",1)
+          old="""    if (_activePositionId == null) {
+      await _lookForInitialVelocityEntry(candles);
+      return;
+    }
+"""
+          new="""    if (_activePositionId == null) {
+      await _lookForInitialVolatilityEntry(candles);
+      return;
+    }
+"""
+          if old in e:e=e.replace(old,new,1)
+          if '_lookForInitialVolatilityEntry' not in e:
+            marker='  Future<void> _lookForInitialVelocityEntry(List<Candle> candles) async {\n'
+            method="""  Future<void> _lookForInitialVolatilityEntry(List<Candle> candles) async {
+    final signal = VolatilityExpansion.analyze(candles, baselinePeriod: config.volatilityBaselinePeriod, expansionThreshold: config.volatilityExpansionThreshold);
+    if (!signal.expanded || signal.direction == VolatilityDirection.neutral) return;
+    final buy = signal.direction == VolatilityDirection.bullish;
+    _activeVolume = await _calculatePositionVolume(buy: buy);
+    await api.marketOrder(symbol: config.symbol, volume: _activeVolume, buy: buy, clientId: '${_clientPrefix}_${DateTime.now().millisecondsSinceEpoch}', magic: magic);
+    for (int attempt = 0; attempt < 5; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final positions = await api.positions();
+      final match = positions.whereType<Map>().map((p)=>Map<String,dynamic>.from(p)).where(_isStrategyPosition).where((p)=>p['symbol']==config.symbol).where((p)=>_positionDirection(p)==(buy?EnginePositionDirection.buy:EnginePositionDirection.sell)).firstOrNull;
+      if(match!=null){
+        _activePositionId=match['id']?.toString();
+        _activeDirection=buy?EnginePositionDirection.buy:EnginePositionDirection.sell;
+        await _createReversalStop(_opposite(_activeDirection!));
+        return;
+      }
+    }
+    throw Exception('MetaApi market order succeeded but the new position was not visible after several terminal-state checks.');
+  }
 
-          e = engine.read_text()
-          old = """import '../strategy/velocity_expansion.dart';\nimport 'metaapi_service.dart';\n"""
-          new = """import '../strategy/velocity_expansion.dart';\nimport '../strategy/volatility_expansion.dart';\nimport 'metaapi_service.dart';\n"""
-          if old not in e:
-              raise SystemExit('Engine import anchor not found')
-          e = e.replace(old, new, 1)
-
-          old = """    if (candles.length < config.velocityBaselinePeriod + 1) {\n      return;\n    }\n\n    final positions = await api.positions();\n"""
-          new = """    if (candles.length < config.velocityBaselinePeriod + 1) {\n      return;\n    }\n\n    // Use the live XAUUSD quote to turn the forming M1 candle into an\n    // intrabar candle. Existing position/trailing/reversal management is\n    // intentionally left unchanged.\n    final livePrice = await _liveEntryPrice();\n    if (livePrice != null && livePrice > 0) {\n      final last = candles.last;\n      candles[candles.length - 1] = Candle(\n        time: last.time,\n        open: last.open,\n        high: last.high > livePrice ? last.high : livePrice,\n        low: last.low < livePrice ? last.low : livePrice,\n        close: livePrice,\n        volume: last.volume,\n      );\n    }\n\n    final positions = await api.positions();\n"""
-          if old not in e:
-              raise SystemExit('Engine candle gate anchor not found')
-          e = e.replace(old, new, 1)
-
-          old = """    if (_activePositionId == null) {\n      await _lookForInitialVelocityEntry(candles);\n      return;\n    }\n"""
-          new = """    if (_activePositionId == null) {\n      await _lookForInitialVolatilityEntry(candles);\n      return;\n    }\n"""
-          if old not in e:
-              raise SystemExit('Engine initial-entry anchor not found')
-          e = e.replace(old, new, 1)
-
-          old = """  Future<void> _lookForInitialVelocityEntry(List<Candle> candles) async {\n"""
-          new = """  Future<void> _lookForInitialVolatilityEntry(List<Candle> candles) async {\n    final signal = VolatilityExpansion.analyze(\n      candles,\n      baselinePeriod: config.volatilityBaselinePeriod,\n      expansionThreshold: config.volatilityExpansionThreshold,\n    );\n\n    if (!signal.expanded || signal.direction == VolatilityDirection.neutral) {\n      return;\n    }\n\n    final buy = signal.direction == VolatilityDirection.bullish;\n\n    _activeVolume = await _calculatePositionVolume(buy: buy);\n\n    final clientId =\n        '${_clientPrefix}_${DateTime.now().millisecondsSinceEpoch}';\n\n    await api.marketOrder(\n      symbol: config.symbol,\n      volume: _activeVolume,\n      buy: buy,\n      clientId: clientId,\n      magic: magic,\n    );\n\n    for (int attempt = 0; attempt < 5; attempt++) {\n      await Future<void>.delayed(const Duration(milliseconds: 300));\n\n      final positions = await api.positions();\n\n      final match = positions\n          .whereType<Map>()\n          .map((p) => Map<String, dynamic>.from(p))\n          .where(_isStrategyPosition)\n          .where((p) => p['symbol'] == config.symbol)\n          .where(\n            (p) => _positionDirection(p) ==\n                (buy ? EnginePositionDirection.buy : EnginePositionDirection.sell),\n          )\n          .firstOrNull;\n\n      if (match != null) {\n        _activePositionId = match['id']?.toString();\n        _activeDirection = buy\n            ? EnginePositionDirection.buy\n            : EnginePositionDirection.sell;\n\n        await _createReversalStop(_opposite(_activeDirection!));\n        return;\n      }\n    }\n\n    throw Exception(\n      'MetaApi market order succeeded but the new position was not visible after several terminal-state checks.',\n    );\n  }\n\n  // Kept available for the existing velocity strategy code path/reference.\n  Future<void> _lookForInitialVelocityEntry(List<Candle> candles) async {\n"""
-          if old not in e:
-              raise SystemExit('Engine velocity-entry method anchor not found')
-          e = e.replace(old, new, 1)
-
-          anchor = """  Future<double> _calculatePositionVolume({required bool buy}) async {\n"""
-          helper = r'''  Future<double?> _liveEntryPrice() async {
+"""
+            if marker not in e: raise SystemExit('entry marker not found')
+            e=e.replace(marker,method+marker,1)
+          if 'Future<double?> _liveEntryPrice()' not in e:
+            anchor='  Future<double> _calculatePositionVolume({required bool buy}) async {\n'
+            helper="""  Future<double?> _liveEntryPrice() async {
     final quote = await api.symbolPrice(config.symbol);
-
-    double? number(dynamic value) {
-      if (value is num) return value.toDouble();
-      return double.tryParse(value?.toString() ?? '');
-    }
-
-    final direct = number(quote['price'] ?? quote['currentPrice'] ?? quote['mid']);
-    if (direct != null && direct > 0) return direct;
-
-    final bid = number(quote['bid'] ?? quote['Bid']);
-    final ask = number(quote['ask'] ?? quote['Ask']);
-    if (bid != null && ask != null && bid > 0 && ask > 0) {
-      return (bid + ask) / 2.0;
-    }
+    double? number(dynamic value) { if (value is num) return value.toDouble(); return double.tryParse(value?.toString() ?? ''); }
+    final direct=number(quote['price'] ?? quote['currentPrice'] ?? quote['mid']);
+    if(direct!=null&&direct>0)return direct;
+    final bid=number(quote['bid'] ?? quote['Bid']);
+    final ask=number(quote['ask'] ?? quote['Ask']);
+    if(bid!=null&&ask!=null&&bid>0&&ask>0)return (bid+ask)/2.0;
     return bid ?? ask;
   }
 
-'''
-          if anchor not in e:
-              raise SystemExit('Engine helper anchor not found')
-          e = e.replace(anchor, helper + anchor, 1)
+"""
+            if anchor not in e: raise SystemExit('volume anchor not found')
+            e=e.replace(anchor,helper+anchor,1)
           engine.write_text(e)
           PY
 
-      - name: Verify exact patch
+      - name: Verify patch
         run: |
           grep -n "volatilityBaselinePeriod" mobile_app/lib/models/trading_config.dart
           grep -n "_lookForInitialVolatilityEntry" mobile_app/lib/services/velocity_reversal_engine.dart
-          grep -n "VolatilityExpansion.analyze" mobile_app/lib/services/velocity_reversal_engine.dart
           test -f mobile_app/lib/strategy/volatility_expansion.dart
 
       - name: Commit and remove patch workflow
