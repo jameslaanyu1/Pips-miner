@@ -1,0 +1,43 @@
+name: Add volatility detector
+
+on:
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add intrabar price and volatility detector
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('mobile_app/lib/services/velocity_reversal_engine.dart')
+          s = p.read_text()
+          old = """    if (candles.length < config.velocityBaselinePeriod + 1) {\n      return;\n    }\n\n    final positions = await api.positions();"""
+          new = """    if (candles.length < config.velocityBaselinePeriod + 1) {\n      return;\n    }\n\n    // Intrabar entry: use the live price for the forming M1 candle.\n    final livePrice = await _liveEntryPrice();\n    if (livePrice != null && livePrice > 0) {\n      final last = candles.last;\n      candles[candles.length - 1] = Candle(\n        time: last.time,\n        open: last.open,\n        high: last.high > livePrice ? last.high : livePrice,\n        low: last.low < livePrice ? last.low : livePrice,\n        close: livePrice,\n        volume: last.volume,\n      );\n    }\n\n    final positions = await api.positions();"""
+          if old not in s: raise SystemExit('candle gate not found')
+          s = s.replace(old, new, 1)
+          old2 = """    if (!signal.expanded || signal.direction == VelocityDirection.neutral) {\n      return;\n    }\n\n    final buy = signal.direction == VelocityDirection.bullish;"""
+          new2 = """    // Volatility detector is an additional entry trigger, not a blocker.\n    final volatilityExpanded = _volatilityExpanded(candles);\n    final liveDirection = candles.last.close > candles[candles.length - 2].close\n        ? VelocityDirection.bullish\n        : candles.last.close < candles[candles.length - 2].close\n            ? VelocityDirection.bearish\n            : VelocityDirection.neutral;\n\n    if (!signal.expanded && !volatilityExpanded) {\n      return;\n    }\n\n    final direction = signal.direction != VelocityDirection.neutral\n        ? signal.direction\n        : liveDirection;\n    if (direction == VelocityDirection.neutral) {\n      return;\n    }\n\n    final buy = direction == VelocityDirection.bullish;"""
+          if old2 not in s: raise SystemExit('entry gate not found')
+          s = s.replace(old2, new2, 1)
+          marker = "  Future<double> _calculatePositionVolume({required bool buy}) async {"
+          helper = """  Future<double?> _liveEntryPrice() async {\n    final quote = await api.symbolPrice(config.symbol);\n    double? number(dynamic value) {\n      if (value is num) return value.toDouble();\n      return double.tryParse(value?.toString() ?? '');\n    }\n    final direct = number(quote['price'] ?? quote['currentPrice'] ?? quote['mid']);\n    if (direct != null && direct > 0) return direct;\n    final bid = number(quote['bid']);\n    final ask = number(quote['ask']);\n    if (bid != null && ask != null && bid > 0 && ask > 0) return (bid + ask) / 2.0;\n    return bid ?? ask;\n  }\n\n  bool _volatilityExpanded(List<Candle> candles) {\n    const period = 5;\n    const threshold = 1.20;\n    if (candles.length < period + 1) return false;\n    double trueRange(Candle current, Candle previous) {\n      final a = current.high - current.low;\n      final b = (current.high - previous.close).abs();\n      final c = (current.low - previous.close).abs();\n      return [a, b, c].reduce((x, y) => x > y ? x : y);\n    }\n    final current = candles.last;\n    final previous = candles[candles.length - 2];\n    final currentRange = trueRange(current, previous);\n    double baseline = 0;\n    final start = candles.length - period - 1;\n    final end = candles.length - 2;\n    for (int i = start; i <= end; i++) baseline += trueRange(candles[i], candles[i - 1]);\n    baseline /= period;\n    return baseline > 0 && currentRange / baseline >= threshold;\n  }\n\n  Future<double> _calculatePositionVolume({required bool buy}) async {"""
+          if marker not in s: raise SystemExit('sizing marker not found')
+          s = s.replace(marker, helper, 1)
+          p.write_text(s)
+      - name: Commit source change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mobile_app/lib/services/velocity_reversal_engine.dart
+          git commit -m 'Add intrabar volatility detector to entry engine'
+          git push
+      - name: Remove one-shot workflow
+        run: |
+          git rm .github/workflows/add-volatility-detector.yml
+          git commit -m 'Remove one-shot volatility patch workflow'
+          git push
