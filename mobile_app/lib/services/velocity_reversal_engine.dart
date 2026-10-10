@@ -67,12 +67,34 @@ class VelocityReversalEngine {
     if (bid == null || ask == null || bid <= 0 || ask <= 0) return;
     final liveMid = (bid + ask) / 2.0;
     final plan = await _loadOptionsPlan();
+    if (_liveCandles.length < config.velocityBaselinePeriod + 1) {
+      final raw = await api.candles(config.symbol, timeframe: '1m', limit: 100);
+      _liveCandles = raw.whereType<Map>()
+          .map((c) => Candle.fromJson(Map<String, dynamic>.from(c)))
+          .toList()
+        ..sort((a, b) => a.time.compareTo(b.time));
+    }
+    if (_liveCandles.length < config.velocityBaselinePeriod + 1) return;
+
+    final signal = VelocityExpansion.analyze(
+      _liveCandles,
+      baselinePeriod: config.velocityBaselinePeriod,
+      expansionThreshold: config.velocityExpansionThreshold,
+      volumeBaselinePeriod: config.volumeBaselinePeriod,
+      volumeExpansionThreshold: config.volumeExpansionThreshold,
+      livePrice: liveMid,
+    );
+
     if (_activePositionId != null) {
-      if (_optionsTrade && _optionsExitPrice != null) {
-        final reached = _activeDirection == EnginePositionDirection.buy
-            ? liveMid >= _optionsExitPrice!
-            : liveMid <= _optionsExitPrice!;
-        if (reached) {
+      if (plan != null && _optionsTrade && !signal.velocityExpanded) {
+        final positions = await api.positions();
+        final active = positions.whereType<Map>()
+            .map((p) => Map<String, dynamic>.from(p))
+            .where((p) => p['id']?.toString() == _activePositionId)
+            .firstOrNull;
+        final profit = active == null ? null : _number(
+          active['profit'] ?? active['unrealizedProfit'] ?? active['currentProfit'] ?? active['floatingProfit']);
+        if (profit != null && profit > 0) {
           await api.closePosition(_activePositionId!);
           _activePositionId = null;
           _activeDirection = null;
@@ -82,23 +104,32 @@ class VelocityReversalEngine {
       }
       return;
     }
-    final zoneSignal = plan == null ? null : _zoneEntry(plan, liveMid);
-    if (zoneSignal != null) {
+
+    if (plan != null) {
+      final zoneSignal = _zoneEntry(plan, liveMid, signal);
+      if (zoneSignal == null) return;
       _busy = true;
       try {
         final buy = zoneSignal['buy'] as bool;
-        _optionsExitPrice = zoneSignal['target'] as double;
+        _optionsExitPrice = null; // Scalps exit on profitable velocity fade, not at the next zone.
         _optionsTrade = true;
         _activeVolume = await _calculatePositionVolume(buy: buy);
-        await api.marketOrder(symbol: config.symbol, volume: _activeVolume, buy: buy,
-          clientId: '${_clientPrefix}_IV_${DateTime.now().microsecondsSinceEpoch}', magic: magic);
+        await api.marketOrder(
+          symbol: config.symbol,
+          volume: _activeVolume,
+          buy: buy,
+          clientId: '${_clientPrefix}_IV_${DateTime.now().microsecondsSinceEpoch}',
+          magic: magic,
+        );
         for (int attempt = 0; attempt < 5; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
           final positions = await api.positions();
-          final match = positions.whereType<Map>().map((p) => Map<String, dynamic>.from(p))
-            .where(_isStrategyPosition).where((p) => p['symbol'] == config.symbol)
-            .where((p) => _positionDirection(p) == (buy ? EnginePositionDirection.buy : EnginePositionDirection.sell))
-            .firstOrNull;
+          final match = positions.whereType<Map>()
+              .map((p) => Map<String, dynamic>.from(p))
+              .where(_isStrategyPosition)
+              .where((p) => p['symbol'] == config.symbol)
+              .where((p) => _positionDirection(p) == (buy ? EnginePositionDirection.buy : EnginePositionDirection.sell))
+              .firstOrNull;
           if (match != null) {
             _activePositionId = match['id']?.toString();
             _activeDirection = buy ? EnginePositionDirection.buy : EnginePositionDirection.sell;
@@ -112,7 +143,7 @@ class VelocityReversalEngine {
         _busy = false;
       }
     }
-    if (plan != null) return;
+
     if (_liveCandles.length < config.velocityBaselinePeriod + 1) {
       final raw = await api.candles(config.symbol, timeframe: '1m', limit: 100);
       _liveCandles = raw.whereType<Map>()
@@ -182,7 +213,7 @@ class VelocityReversalEngine {
     try { return Map<String, dynamic>.from(jsonDecode(raw) as Map); } catch (_) { return null; }
   }
 
-  Map<String, dynamic>? _zoneEntry(Map<String, dynamic> plan, double price) {
+  Map<String, dynamic>? _zoneEntry(Map<String, dynamic> plan, double price, VelocityExpansionResult signal) {
     final rawZones = plan['zones'];
     if (rawZones is! List) return null;
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
@@ -193,18 +224,19 @@ class VelocityReversalEngine {
       ..sort((a,b) => (b['price'] as double).compareTo(a['price'] as double));
     final resistances = zones.where((z) => z['isResistance'] == true).toList()
       ..sort((a,b) => (a['price'] as double).compareTo(b['price'] as double));
+    if (!signal.expanded || signal.direction == VelocityDirection.neutral) return null;
     for (final z in supports) {
       final level = z['price'] as double;
       if ((price - level).abs() / level <= 0.0005) {
         final target = resistances.where((r) => (r['price'] as double) > price).firstOrNull;
-        if (target != null) return {'buy': true, 'target': target['price'] as double};
+        if (target != null && signal.direction == VelocityDirection.bullish) return {'buy': true};
       }
     }
     for (final z in resistances) {
       final level = z['price'] as double;
       if ((price - level).abs() / level <= 0.0005) {
         final target = supports.where((r) => (r['price'] as double) < price).firstOrNull;
-        if (target != null) return {'buy': false, 'target': target['price'] as double};
+        if (target != null && signal.direction == VelocityDirection.bearish) return {'buy': false};
       }
     }
     return null;
