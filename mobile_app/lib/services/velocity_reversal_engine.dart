@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/candle.dart';
 import '../models/trading_config.dart';
 import '../strategy/velocity_expansion.dart';
@@ -23,6 +27,8 @@ class VelocityReversalEngine {
   String? _reversalOrderId;
   EnginePositionDirection? _reversalDirection;
   double? _lastReversalPrice;
+  double? _optionsExitPrice;
+  bool _optionsTrade = false;
 
   bool get running => _running;
   String? get activePositionId => _activePositionId;
@@ -55,12 +61,58 @@ class VelocityReversalEngine {
   /// no REST price request and no candle wait occurs before signal evaluation.
   Future<void> tickLive(Map<String, dynamic> livePrice) async {
     if (!_running || _busy) return;
-    if (_activePositionId != null) return;
 
     final bid = _number(livePrice['bid'] ?? livePrice['Bid'] ?? livePrice['last']);
     final ask = _number(livePrice['ask'] ?? livePrice['Ask'] ?? livePrice['last']);
     if (bid == null || ask == null || bid <= 0 || ask <= 0) return;
-
+    final liveMid = (bid + ask) / 2.0;
+    final plan = await _loadOptionsPlan();
+    if (_activePositionId != null) {
+      if (_optionsTrade && _optionsExitPrice != null) {
+        final reached = _activeDirection == EnginePositionDirection.buy
+            ? liveMid >= _optionsExitPrice!
+            : liveMid <= _optionsExitPrice!;
+        if (reached) {
+          await api.closePosition(_activePositionId!);
+          _activePositionId = null;
+          _activeDirection = null;
+          _optionsExitPrice = null;
+          _optionsTrade = false;
+        }
+      }
+      return;
+    }
+    final zoneSignal = plan == null ? null : _zoneEntry(plan, liveMid);
+    if (zoneSignal != null) {
+      _busy = true;
+      try {
+        final buy = zoneSignal['buy'] as bool;
+        _optionsExitPrice = zoneSignal['target'] as double;
+        _optionsTrade = true;
+        _activeVolume = await _calculatePositionVolume(buy: buy);
+        await api.marketOrder(symbol: config.symbol, volume: _activeVolume, buy: buy,
+          clientId: '${_clientPrefix}_IV_${DateTime.now().microsecondsSinceEpoch}', magic: magic);
+        for (int attempt = 0; attempt < 5; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          final positions = await api.positions();
+          final match = positions.whereType<Map>().map((p) => Map<String, dynamic>.from(p))
+            .where(_isStrategyPosition).where((p) => p['symbol'] == config.symbol)
+            .where((p) => _positionDirection(p) == (buy ? EnginePositionDirection.buy : EnginePositionDirection.sell))
+            .firstOrNull;
+          if (match != null) {
+            _activePositionId = match['id']?.toString();
+            _activeDirection = buy ? EnginePositionDirection.buy : EnginePositionDirection.sell;
+            final actualVolume = _number(match['volume'] ?? match['lots'] ?? match['currentVolume']);
+            if (actualVolume != null && actualVolume > 0) _activeVolume = actualVolume;
+            return;
+          }
+        }
+        throw Exception('IV-zone order sent but the position was not confirmed.');
+      } finally {
+        _busy = false;
+      }
+    }
+    if (plan != null) return;
     if (_liveCandles.length < config.velocityBaselinePeriod + 1) {
       final raw = await api.candles(config.symbol, timeframe: '1m', limit: 100);
       _liveCandles = raw.whereType<Map>()
@@ -78,7 +130,7 @@ class VelocityReversalEngine {
         expansionThreshold: config.velocityExpansionThreshold,
         volumeBaselinePeriod: config.volumeBaselinePeriod,
         volumeExpansionThreshold: config.volumeExpansionThreshold,
-        livePrice: (bid + ask) / 2.0,
+        livePrice: liveMid,
       );
 
       if (!signal.expanded || signal.direction == VelocityDirection.neutral) return;
@@ -122,6 +174,42 @@ class VelocityReversalEngine {
     }
   }
 
+
+  Future<Map<String, dynamic>?> _loadOptionsPlan() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('pips_miner_iv_options_zone_plan');
+    if (raw == null || raw.isEmpty) return null;
+    try { return Map<String, dynamic>.from(jsonDecode(raw) as Map); } catch (_) { return null; }
+  }
+
+  Map<String, dynamic>? _zoneEntry(Map<String, dynamic> plan, double price) {
+    final rawZones = plan['zones'];
+    if (rawZones is! List) return null;
+    final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
+      .map((z) => {'label': z['label']?.toString() ?? '', 'price': (z['price'] as num?)?.toDouble(), 'isResistance': z['isResistance'] == true})
+      .where((z) => z['price'] != null).toList();
+    if (zones.length != 6) return null;
+    final supports = zones.where((z) => z['isResistance'] == false).toList()
+      ..sort((a,b) => (b['price'] as double).compareTo(a['price'] as double));
+    final resistances = zones.where((z) => z['isResistance'] == true).toList()
+      ..sort((a,b) => (a['price'] as double).compareTo(b['price'] as double));
+    for (final z in supports) {
+      final level = z['price'] as double;
+      if (price <= level && (level - price) / level <= 0.0005) {
+        final target = resistances.where((r) => (r['price'] as double) > price).firstOrNull;
+        if (target != null) return {'buy': true, 'target': target['price'] as double};
+      }
+    }
+    for (final z in resistances) {
+      final level = z['price'] as double;
+      if (price >= level && (price - level) / level <= 0.0005) {
+        final target = supports.where((r) => (r['price'] as double) < price).firstOrNull;
+        if (target != null) return {'buy': false, 'target': target['price'] as double};
+      }
+    }
+    return null;
+  }
+
   Future<void> cleanupManagedExposure() async {
     final positions = await api.positions();
     final orders = await api.orders();
@@ -156,6 +244,8 @@ class VelocityReversalEngine {
     _reversalOrderId = null;
     _reversalDirection = null;
     _lastReversalPrice = null;
+    _optionsExitPrice = null;
+    _optionsTrade = false;
   }
 
   Future<void> reconcile() async {
