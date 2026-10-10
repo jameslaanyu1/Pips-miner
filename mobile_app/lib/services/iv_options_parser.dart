@@ -88,15 +88,17 @@ class IvOptionsParser {
     final sorted = values.toList()..sort();
     final spotMatch = RegExp(r'(?:XAU\s*/?\s*USD|GOLD|SPOT)\D{0,30}(\d{4}(?:\.\d+)?)', caseSensitive: false).firstMatch(text);
     final spot = spotMatch == null ? null : double.tryParse(spotMatch.group(1)!);
-    final reference = spot ?? sorted[sorted.length ~/ 2];
-    // Keep the nearest six strikes around the reference, excluding the reference strike.
-    final below = sorted.where((v) => v < reference).toList()..sort((a,b) => b.compareTo(a));
-    final above = sorted.where((v) => v > reference).toList()..sort();
-    if (below.length < 3 || above.length < 3) {
-      throw const FormatException('Could not identify three strikes above and three below the reference price. Check the extracted text before retrying.');
+    // Select seven strikes nearest spot, then exclude the middle strike.
+    final anchor = spot ?? sorted[sorted.length ~/ 2];
+    final nearest = sorted.toList()..sort((a, b) => (a - anchor).abs().compareTo((b - anchor).abs()));
+    final selected = nearest.take(7).toList()..sort();
+    if (selected.length < 7) {
+      throw const FormatException('Seven distinct gold strike prices are required to exclude the middle strike and create six zones.');
     }
-    final lower = below.take(3).toList()..sort();
-    final upper = above.take(3).toList()..sort();
+    final reference = spot ?? selected[selected.length ~/ 2];
+    final middleIndex = selected.length ~/ 2;
+    final lower = selected.take(middleIndex).toList();
+    final upper = selected.skip(middleIndex + 1).toList();
     final zones = <OptionsZone>[
       OptionsZone(label: 'R3', price: upper[2], isResistance: true),
       OptionsZone(label: 'R2', price: upper[1], isResistance: true),
