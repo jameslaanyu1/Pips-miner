@@ -195,14 +195,14 @@ class VelocityReversalEngine {
       ..sort((a,b) => (a['price'] as double).compareTo(b['price'] as double));
     for (final z in supports) {
       final level = z['price'] as double;
-      if (price <= level && (level - price) / level <= 0.0005) {
+      if ((price - level).abs() / level <= 0.0005) {
         final target = resistances.where((r) => (r['price'] as double) > price).firstOrNull;
         if (target != null) return {'buy': true, 'target': target['price'] as double};
       }
     }
     for (final z in resistances) {
       final level = z['price'] as double;
-      if (price >= level && (price - level) / level <= 0.0005) {
+      if ((price - level).abs() / level <= 0.0005) {
         final target = supports.where((r) => (r['price'] as double) < price).firstOrNull;
         if (target != null) return {'buy': false, 'target': target['price'] as double};
       }
@@ -283,6 +283,7 @@ class VelocityReversalEngine {
     }
 
     if (_activePositionId == null) return;
+    if (await _loadOptionsPlan() != null) return; // IV plan manages exits; do not place legacy reversal stops.
     final expectedReversal = _opposite(_activeDirection!);
     final pending = strategyOrders.where((o) => _orderDirection(o) == expectedReversal).toList();
     if (pending.isEmpty) {
