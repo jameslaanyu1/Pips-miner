@@ -2,7 +2,7 @@ name: Build and Release Pips Miner APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/iv-options-zone-parser]
   workflow_dispatch:
 
 permissions:
@@ -200,6 +200,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
