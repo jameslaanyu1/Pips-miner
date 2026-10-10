@@ -60,7 +60,7 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
           const Text('This first parser version extracts text and ranks nearby strikes; it does not infer options-market positioning from delta/IV alone. Confirm the levels against the source before enabling them.', style: TextStyle(fontSize: 12, color: Colors.orangeAccent)),
           const SizedBox(height: 10),
           FilledButton.icon(onPressed: _approve, icon: const Icon(Icons.verified), label: const Text('Approve and save zones')),
-          if (_approved) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Zones saved for the bot. Zone-based execution still requires the bot to be configured for this strategy.', style: TextStyle(color: Colors.greenAccent))),
+          if (_approved) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Zones saved. The IV-zone scalping plan will guide entries while the bot is running.', style: TextStyle(color: Colors.greenAccent))),
         ]))),
       ],
     ]),
