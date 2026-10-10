@@ -165,133 +165,32 @@ jobs:
           import re
           path = Path('android/app/build.gradle.kts')
           text = path.read_text()
-          imports = '''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
+          imports = '''import java.util.Properties
+          import java.io.FileInputStream
+          val signingProperties = Properties()
+          val signingPropertiesFile = rootProject.file("key.properties")
+          if (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))
+          '''
           if 'signingPropertiesFile' not in text:
               text = imports + text
           if 'create("pipsMinerRelease")' not in text:
-              signing = '''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
+              signing = '''
+              signingConfigs {
+                  create("pipsMinerRelease") {
+                      keyAlias = signingProperties.getProperty("keyAlias")
+                      keyPassword = signingProperties.getProperty("keyPassword")
+                      storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }
+                      storePassword = signingProperties.getProperty("storePassword")
+                  }
+              }
+              '''
               text = text.replace('android {', 'android {' + signing, 1)
-          release_signing = '            signingConfig = if (signingPropertiesFile.exists()) signingConfigs.getByName("pipsMinerRelease") else signingConfigs.getByName("debug")'
-          release_signing_old = '            signingConfig = signingConfigs.getByName("pipsMinerRelease")'
-          if release_signing_old in text:
-              text = text.replace(release_signing_old, release_signing, 1)
-          elif 'signingConfig =' not in text:
-              text = text.replace('release {', 'release {\n' + release_signing + '\n', 1)
-          path.write_text(text)
-          PY
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Generate app icons
-        run: dart run flutter_launcher_icons
-
-      - name: Analyze Flutter project
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
-
-      - name: Build release APK
-        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
-
-      - name: Prepare release APK
-        working-directory: .
-        run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pips-Miner-v1.0.${{ github.run_number }}
-          path: Pips-Miner-release.apk
-          if-no-files-found: error
-
-      - name: Publish GitHub release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Pips Miner v1.0.${{ github.run_number }}
-          generate_release_notes: true
-          make_latest: true
-          files: Pips-Miner-release.apk
-          token: ${{ github.token }}
-, '            signingConfig = if (signingPropertiesFile.exists()) signingConfigs.getByName("pipsMinerRelease") else signingConfigs.getByName("debug")', text)
-          if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
-              text = text.replace('release {', 'release {\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")', 1)
-          path.write_text(text)
-          PY
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Generate app icons
-        run: dart run flutter_launcher_icons
-
-      - name: Analyze Flutter project
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
-
-      - name: Build release APK
-        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
-
-      - name: Prepare release APK
-        working-directory: .
-        run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pips-Miner-v1.0.${{ github.run_number }}
-          path: Pips-Miner-release.apk
-          if-no-files-found: error
-
-      - name: Publish GitHub release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Pips Miner v1.0.${{ github.run_number }}
-          generate_release_notes: true
-          make_latest: true
-          files: Pips-Miner-release.apk
-          token: ${{ github.token }}
-, '            signingConfig = if (signingPropertiesFile.exists()) signingConfigs.getByName("pipsMinerRelease") else signingConfigs.getByName("debug")', text)
-          if 'signingConfig =' not in text:
-              text = text.replace('release {', 'release {\n            signingConfig = if (signingPropertiesFile.exists()) signingConfigs.getByName("pipsMinerRelease") else signingConfigs.getByName("debug")', 1)
-          path.write_text(text)
-          PY
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Generate app icons
-        run: dart run flutter_launcher_icons
-
-      - name: Analyze Flutter project
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
-
-      - name: Build release APK
-        run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
-
-      - name: Prepare release APK
-        working-directory: .
-        run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Pips-Miner-v1.0.${{ github.run_number }}
-          path: Pips-Miner-release.apk
-          if-no-files-found: error
-
-      - name: Publish GitHub release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Pips Miner v1.0.${{ github.run_number }}
-          generate_release_notes: true
-          make_latest: true
-          files: Pips-Miner-release.apk
-          token: ${{ github.token }}
-, '            signingConfig = if (signingPropertiesFile.exists()) signingConfigs.getByName("pipsMinerRelease") else signingConfigs.getByName("debug")', text)
+          text = re.sub(
+              r'(?m)^\s*signingConfig\s*=.*$',
+              '            signingConfig = signingConfigs.getByName("pipsMinerRelease")',
+              text,
+              count=1,
+          )
           if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
               text = text.replace('release {', 'release {\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")', 1)
           path.write_text(text)
