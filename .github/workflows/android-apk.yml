@@ -76,11 +76,11 @@ jobs:
               '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")',
           ]
           if 'com.google.mlkit:text-recognition-chinese:' not in text:
-              dep_match = re.search(r'(?m)^dependencies\\s*\\{', text)
-              if not dep_match:
+              dep_match = text.find('dependencies {')
+              if dep_match < 0:
                   raise SystemExit('ERROR: dependencies block not found in build.gradle.kts')
-              insert_at = dep_match.end()
-              text = text[:insert_at] + '\\n' + '\\n'.join(mlkit_deps) + text[insert_at:]
+              insert_at = dep_match + len('dependencies {')
+              text = text[:insert_at] + '\n' + '\n'.join(mlkit_deps) + text[insert_at:]
 
           if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in text:
               dependency = 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n'
