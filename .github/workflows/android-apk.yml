@@ -67,8 +67,8 @@ jobs:
               text = text[:block_start] + compile_options + text[block_start:]
 
           # Ensure a dependencies block exists; newer Flutter templates may omit it.
-          if not re.search(r'(?m)^dependencies\\s*\\{', text):
-              text += '\\n\\ndependencies {\\n}\\n'
+          if not re.search(r'(?m)^dependencies\s*\{', text):
+              text += '\n\ndependencies {\n}\n'
 
           # google_mlkit_text_recognition references all script option classes,
           # so include the matching ML Kit artifacts to satisfy R8 in release builds.
@@ -81,16 +81,16 @@ jobs:
           ]
           if 'com.google.mlkit:text-recognition-chinese:' not in text:
               text = re.sub(
-                  r'(?m)^dependencies\\s*\\{',
-                  'dependencies {\\n' + '\\n'.join(mlkit_deps),
+                  r'(?m)^dependencies\s*\{',
+                  'dependencies {\n' + '\n'.join(mlkit_deps),
                   text,
                   count=1,
               )
 
           if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in text:
               text = re.sub(
-                  r'(?m)^dependencies\\s*\\{',
-                  'dependencies {\\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                  r'(?m)^dependencies\s*\{',
+                  'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
                   text,
                   count=1,
               )
