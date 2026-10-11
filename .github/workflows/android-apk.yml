@@ -66,6 +66,10 @@ jobs:
               compile_options = '''\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n        isCoreLibraryDesugaringEnabled = true\n    }\n'''
               text = text[:block_start] + compile_options + text[block_start:]
 
+          # Ensure a dependencies block exists; newer Flutter templates may omit it.
+          if not re.search(r'(?m)^dependencies\\s*\\{', text):
+              text += '\\n\\ndependencies {\\n}\\n'
+
           # google_mlkit_text_recognition references all script option classes,
           # so include the matching ML Kit artifacts to satisfy R8 in release builds.
           mlkit_deps = [
@@ -76,18 +80,20 @@ jobs:
               '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")',
           ]
           if 'com.google.mlkit:text-recognition-chinese:' not in text:
-              dep_match = text.find('dependencies {')
-              if dep_match < 0:
-                  raise SystemExit('ERROR: dependencies block not found in build.gradle.kts')
-              insert_at = dep_match + len('dependencies {')
-              text = text[:insert_at] + '\n' + '\n'.join(mlkit_deps) + text[insert_at:]
+              text = re.sub(
+                  r'(?m)^dependencies\\s*\\{',
+                  'dependencies {\\n' + '\\n'.join(mlkit_deps),
+                  text,
+                  count=1,
+              )
 
           if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in text:
-              dependency = 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n'
-              if re.search(r'(?m)^dependencies\s*\{', text):
-                  text = re.sub(r'(?m)^dependencies\s*\{', dependency, text, count=1)
-              else:
-                  text += '\n' + dependency + '}\n'
+              text = re.sub(
+                  r'(?m)^dependencies\\s*\\{',
+                  'dependencies {\\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                  text,
+                  count=1,
+              )
 
           text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36', 1)
           text = re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"', r'\1namespace = "com.example.pips_miner"', text, count=1)
