@@ -133,7 +133,7 @@ class VelocityReversalEngine {
             _activeDirection = buy ? EnginePositionDirection.buy : EnginePositionDirection.sell;
             final actualVolume = _number(match['volume'] ?? match['lots'] ?? match['currentVolume']);
             if (actualVolume != null && actualVolume > 0) _activeVolume = actualVolume;
-            _ivEntryPrice = _number(match['openPrice'] ?? match['price']);
+            _ivEntryPrice = _number(match['openPrice'] ?? match['price']) ?? liveMid;
             await _saveIvState();
             return;
           }
