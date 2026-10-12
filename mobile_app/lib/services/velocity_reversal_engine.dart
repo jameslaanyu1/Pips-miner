@@ -34,6 +34,11 @@ class VelocityReversalEngine {
   double? _ivEntryPrice;
   bool _ivResistanceTested = false;
   bool _ivBreakoutConfirmed = false;
+  double? _ivBreakoutLevel;
+  int _ivBreakoutDirection = 0; // +1 bullish break, -1 bearish break.
+  bool _ivRetracementSeen = false;
+  double? _ivLastTargetPrice;
+  int _ivLastTargetDirection = 0;
   int _ivBias = 1;
   static const String _ivStateKey = 'pips_miner_iv_trade_state';
 
@@ -222,6 +227,11 @@ class VelocityReversalEngine {
       _ivBias = (state['bias'] as num?)?.toInt() ?? _ivBias;
       _ivResistanceTested = state['resistanceTested'] == true;
       _ivBreakoutConfirmed = state['breakoutConfirmed'] == true;
+      _ivBreakoutLevel = _number(state['breakoutLevel']);
+      _ivBreakoutDirection = (state['breakoutDirection'] as num?)?.toInt() ?? 0;
+      _ivRetracementSeen = state['retracementSeen'] == true;
+      _ivLastTargetPrice = _number(state['lastTargetPrice']);
+      _ivLastTargetDirection = (state['lastTargetDirection'] as num?)?.toInt() ?? 0;
       _ivHedgePositionId = state['hedgePositionId']?.toString();
       _ivHedgeParentId = state['hedgeParentId']?.toString();
       _ivEntryPrice = _number(state['entryPrice']) ?? _ivEntryPrice;
@@ -233,6 +243,9 @@ class VelocityReversalEngine {
     await prefs.setString(_ivStateKey, jsonEncode({
       'bias': _ivBias, 'resistanceTested': _ivResistanceTested,
       'breakoutConfirmed': _ivBreakoutConfirmed,
+      'breakoutLevel': _ivBreakoutLevel, 'breakoutDirection': _ivBreakoutDirection,
+      'retracementSeen': _ivRetracementSeen, 'lastTargetPrice': _ivLastTargetPrice,
+      'lastTargetDirection': _ivLastTargetDirection,
       'hedgePositionId': _ivHedgePositionId, 'hedgeParentId': _ivHedgeParentId,
       'entryPrice': _ivEntryPrice,
     }));
@@ -317,7 +330,12 @@ class VelocityReversalEngine {
       await api.closePosition(id);
       final remaining = (await api.positions()).whereType<Map>()
           .map((p) => Map<String, dynamic>.from(p)).any((p) => p['id']?.toString() == id);
-      if (!remaining) await _clearIvTradeState();
+      if (!remaining) {
+        _ivLastTargetPrice = price;
+        _ivLastTargetDirection = direction == EnginePositionDirection.buy ? 1 : -1;
+        _ivRetracementSeen = false;
+        await _clearIvTradeState();
+      }
       return;
     }
     if (adverse >= 200 * pipSize) {
@@ -371,43 +389,105 @@ class VelocityReversalEngine {
     final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
     bool near(double level) => (price - level).abs() / level <= tolerance;
     final topResistance = resistances.last['price'] as double;
+    final topSupport = supports.first['price'] as double;
+    final bottomSupport = supports.last['price'] as double;
+    final bottomResistance = resistances.first['price'] as double;
 
+    // Breakouts are symmetric: break above resistance or below support, then
+    // wait for a retracement/retest of the broken boundary before entering.
     if (price > topResistance * (1 + tolerance)) {
       _ivBias = 1;
       _ivBreakoutConfirmed = true;
+      _ivBreakoutDirection = 1;
+      _ivBreakoutLevel = topResistance;
       _ivResistanceTested = true;
+      _ivRetracementSeen = false;
       await _saveIvState();
-      return null; // Confirm the break, then wait for a retest rather than chase.
+      return null;
     }
-    if (_ivBreakoutConfirmed && _ivBias > 0 && near(topResistance) && current > 0) {
-      return {'buy': true}; // Bullish continuation after a broken-resistance retest.
+    if (price < bottomSupport * (1 - tolerance)) {
+      _ivBias = -1;
+      _ivBreakoutConfirmed = true;
+      _ivBreakoutDirection = -1;
+      _ivBreakoutLevel = bottomSupport;
+      _ivResistanceTested = false;
+      _ivRetracementSeen = false;
+      await _saveIvState();
+      return null;
     }
+    final breakoutLevel = _ivBreakoutLevel;
+    if (_ivBreakoutConfirmed && breakoutLevel != null) {
+      if (_ivBreakoutDirection > 0) {
+        if (price <= breakoutLevel * (1 + tolerance)) _ivRetracementSeen = true;
+        if (_ivRetracementSeen && near(breakoutLevel) && current > 0 && price >= breakoutLevel) {
+          _ivRetracementSeen = false;
+          await _saveIvState();
+          return {'buy': true};
+        }
+      } else if (_ivBreakoutDirection < 0) {
+        if (price >= breakoutLevel * (1 - tolerance)) _ivRetracementSeen = true;
+        if (_ivRetracementSeen && near(breakoutLevel) && current < 0 && price <= breakoutLevel) {
+          _ivRetracementSeen = false;
+          await _saveIvState();
+          return {'buy': false};
+        }
+      }
+      await _saveIvState();
+      return null;
+    }
+
+    // Re-entries after a 350-pip target must first retrace against the prior
+    // direction, then resume that direction. This prevents instant re-entry.
+    if (_ivLastTargetDirection != 0) {
+      final trend = _ivLastTargetDirection;
+      if ((trend > 0 && current < 0) || (trend < 0 && current > 0)) {
+        _ivRetracementSeen = true;
+        await _saveIvState();
+        return null;
+      }
+      if (_ivRetracementSeen && ((trend > 0 && current > 0) || (trend < 0 && current < 0))) {
+        _ivRetracementSeen = false;
+        _ivLastTargetDirection = 0;
+        _ivLastTargetPrice = null;
+        await _saveIvState();
+        return {'buy': trend > 0};
+      }
+      return null;
+    }
+
     for (final zone in resistances) {
       final level = zone['price'] as double;
       if (!near(level)) continue;
       _ivResistanceTested = true;
-      if (!_ivBreakoutConfirmed && previous > 0 && current < 0 && price <= level) {
+      if (previous > 0 && current < 0 && price <= level) {
         _ivBias = -1;
         _ivBreakoutConfirmed = false;
+        _ivBreakoutDirection = 0;
         await _saveIvState();
         return {'buy': false};
       }
       await _saveIvState();
       return null;
     }
+
     if (_ivBias >= 0) {
       for (final zone in supports) {
         final level = zone['price'] as double;
-        // Previous candle moved down; live tick has turned up: downward impulse faded.
         if (near(level) && previous < 0 && current > 0 && price >= level) return {'buy': true};
       }
     } else {
+      // Support levels are checked below for bearish continuation.
+    }
+    // A bearish bias can also continue after a support-zone retracement.
+    if (_ivBias < 0) {
       for (final zone in supports) {
         final level = zone['price'] as double;
-        if (near(level) && previous < 0 && current < 0 && signal.expanded) return {'buy': false};
+        if (near(level) && previous > 0 && current < 0 && price <= level) return {'buy': false};
       }
     }
-    return null; // Explicit no-trade area between zones.
+    // Prevent unused boundary variables from obscuring intended symmetric logic.
+    if (price >= bottomResistance && price <= topSupport) return null;
+    return null; // No entry in the middle of zones.
   }
 
   Future<void> cleanupManagedExposure() async {
