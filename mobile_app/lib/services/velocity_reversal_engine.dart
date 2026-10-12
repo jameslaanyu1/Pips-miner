@@ -324,7 +324,18 @@ class VelocityReversalEngine {
     final pipSize = await _pipSize();
     final favorable = direction == EnginePositionDirection.buy ? price - openPrice : openPrice - price;
     final adverse = -favorable;
-    if (favorable >= 350 * pipSize) {
+    // The 350-pip distance arms the exit; close only when momentum fades.
+    final previousVelocity = _liveCandles.length >= 3
+        ? _liveCandles[_liveCandles.length - 2].close -
+            _liveCandles[_liveCandles.length - 3].close
+        : 0.0;
+    final currentVelocity = signal.currentVelocity;
+    final momentumFaded = direction == EnginePositionDirection.buy
+        ? currentVelocity <= 0 ||
+            (previousVelocity > 0 && currentVelocity < previousVelocity)
+        : currentVelocity >= 0 ||
+            (previousVelocity < 0 && currentVelocity > previousVelocity);
+    if (favorable >= 350 * pipSize && momentumFaded) {
       final id = active['id']?.toString();
       if (id == null) return;
       await api.closePosition(id);
@@ -436,16 +447,32 @@ class VelocityReversalEngine {
       return null;
     }
 
-    // Re-entries after a 350-pip target must first retrace against the prior
-    // direction, then resume that direction. This prevents instant re-entry.
+    // Treat even a brief counter-trend velocity pulse as a retracement.
+    // Enter as soon as that counter-trend velocity starts shrinking: this is
+    // the dip entry, not a wait for velocity to cross zero.
     if (_ivLastTargetDirection != 0) {
       final trend = _ivLastTargetDirection;
-      if ((trend > 0 && current < 0) || (trend < 0 && current > 0)) {
+      final targetPrice = _ivLastTargetPrice;
+      final retracing = targetPrice != null &&
+          (trend > 0 ? price < targetPrice : price > targetPrice);
+      final counterTrend = trend > 0 ? current < 0 : current > 0;
+      final counterTrendFading = trend > 0
+          ? current < 0 && current > previous
+          : current > 0 && current < previous;
+      if (retracing && counterTrend) {
         _ivRetracementSeen = true;
+        if (counterTrendFading) {
+          _ivRetracementSeen = false;
+          _ivLastTargetDirection = 0;
+          _ivLastTargetPrice = null;
+          await _saveIvState();
+          return {'buy': trend > 0};
+        }
         await _saveIvState();
         return null;
       }
-      if (_ivRetracementSeen && ((trend > 0 && current > 0) || (trend < 0 && current < 0))) {
+      // A quick counter-trend pulse may already have faded on this tick.
+      if (_ivRetracementSeen && counterTrendFading) {
         _ivRetracementSeen = false;
         _ivLastTargetDirection = 0;
         _ivLastTargetPrice = null;
@@ -459,7 +486,7 @@ class VelocityReversalEngine {
       final level = zone['price'] as double;
       if (!near(level)) continue;
       _ivResistanceTested = true;
-      if (previous > 0 && current < 0 && price <= level) {
+      if (previous > 0 && current > 0 && current < previous && price <= level) {
         _ivBias = -1;
         _ivBreakoutConfirmed = false;
         _ivBreakoutDirection = 0;
@@ -473,7 +500,7 @@ class VelocityReversalEngine {
     if (_ivBias >= 0) {
       for (final zone in supports) {
         final level = zone['price'] as double;
-        if (near(level) && previous < 0 && current > 0 && price >= level) return {'buy': true};
+        if (near(level) && previous < 0 && current < 0 && current > previous && price >= level) return {'buy': true};
       }
     } else {
       // Support levels are checked below for bearish continuation.
@@ -482,7 +509,7 @@ class VelocityReversalEngine {
     if (_ivBias < 0) {
       for (final zone in supports) {
         final level = zone['price'] as double;
-        if (near(level) && previous > 0 && current < 0 && price <= level) return {'buy': false};
+        if (near(level) && previous > 0 && current > 0 && current < previous && price <= level) return {'buy': false};
       }
     }
     return null; // No entry in the middle of zones.
