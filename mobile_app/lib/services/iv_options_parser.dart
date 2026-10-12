@@ -83,7 +83,7 @@ class IvOptionsParser {
       }
       final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       try {
-        final recognized = await recognizer.processImage(InputImage.fromFilePath(path));
+        final recognized = await recognizer.processImage(InputImage.fromFilePath(imagePath));
         text = recognized.text;
       } finally {
         await recognizer.close();
