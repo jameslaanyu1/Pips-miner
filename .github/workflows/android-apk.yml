@@ -257,7 +257,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Pips-Miner-v1.0.${{ github.run_number }}-${{ github.ref_name }}
+          name: Pips-Miner-v1.0.${{ github.run_number }}-${{ github.run_id }}
           path: Pips-Miner-release.apk
           if-no-files-found: error
           retention-days: 30
