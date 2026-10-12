@@ -389,13 +389,12 @@ class VelocityReversalEngine {
     final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
     bool near(double level) => (price - level).abs() / level <= tolerance;
     final topResistance = resistances.last['price'] as double;
-    final topSupport = supports.first['price'] as double;
     final bottomSupport = supports.last['price'] as double;
-    final bottomResistance = resistances.first['price'] as double;
 
     // Breakouts are symmetric: break above resistance or below support, then
     // wait for a retracement/retest of the broken boundary before entering.
-    if (price > topResistance * (1 + tolerance)) {
+    if (price > topResistance * (1 + tolerance) &&
+        (!_ivBreakoutConfirmed || _ivBreakoutDirection != 1)) {
       _ivBias = 1;
       _ivBreakoutConfirmed = true;
       _ivBreakoutDirection = 1;
@@ -405,7 +404,8 @@ class VelocityReversalEngine {
       await _saveIvState();
       return null;
     }
-    if (price < bottomSupport * (1 - tolerance)) {
+    if (price < bottomSupport * (1 - tolerance) &&
+        (!_ivBreakoutConfirmed || _ivBreakoutDirection != -1)) {
       _ivBias = -1;
       _ivBreakoutConfirmed = true;
       _ivBreakoutDirection = -1;
@@ -485,8 +485,6 @@ class VelocityReversalEngine {
         if (near(level) && previous > 0 && current < 0 && price <= level) return {'buy': false};
       }
     }
-    // Prevent unused boundary variables from obscuring intended symmetric logic.
-    if (price >= bottomResistance && price <= topSupport) return null;
     return null; // No entry in the middle of zones.
   }
 
