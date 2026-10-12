@@ -163,7 +163,6 @@ jobs:
           EOF
 
       - name: Configure package identity and release signing
-        if: github.ref == 'refs/heads/main'
         env:
           PIPS_MINER_KEYSTORE_BASE64: ${{ secrets.PIPS_MINER_KEYSTORE_BASE64 }}
           PIPS_MINER_KEY_ALIAS: ${{ secrets.PIPS_MINER_KEY_ALIAS }}
@@ -246,8 +245,7 @@ jobs:
         working-directory: .
         run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
 
-      - name: Verify signed production APK
-        if: github.ref == 'refs/heads/main'
+      - name: Verify signed APK
         working-directory: .
         run: |
           set -euo pipefail
