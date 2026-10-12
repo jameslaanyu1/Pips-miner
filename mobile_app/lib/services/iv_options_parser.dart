@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -27,17 +29,28 @@ class OptionsZonePlan {
   final String? expiry;
   final String sourceText;
 
+  factory OptionsZonePlan.fromJson(Map<String, dynamic> json) => OptionsZonePlan(
+    zones: (json['zones'] as List<dynamic>)
+        .map((zone) => OptionsZone.fromJson(Map<String, dynamic>.from(zone as Map)))
+        .toList(),
+    referencePrice: (json['referencePrice'] as num).toDouble(),
+    expiry: json['expiry'] as String?,
+    sourceText: json['sourceText'] as String? ?? '',
+  );
+
   Map<String, dynamic> toJson() => {
     'zones': zones.map((z) => z.toJson()).toList(),
     'referencePrice': referencePrice,
     'expiry': expiry,
     'sourceText': sourceText,
-    'approvedAt': DateTime.now().toUtc().toIso8601String(),
+    'savedAt': DateTime.now().toUtc().toIso8601String(),
   };
 }
 
 class IvOptionsParser {
   static const storageKey = 'pips_miner_iv_options_zone_plan';
+  static const sourcePathKey = 'pips_miner_iv_options_source_path';
+  static const sourceNameKey = 'pips_miner_iv_options_source_name';
 
   Future<OptionsZonePlan> parsePickedFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -47,10 +60,13 @@ class IvOptionsParser {
     );
     if (result == null || result.files.isEmpty) throw const FormatException('No file selected.');
     final file = result.files.single;
-    final name = file.name.toLowerCase();
+    final name = file.name;
+    final lowerName = name.toLowerCase();
+    final bytes = file.bytes ?? (file.path == null ? null : await File(file.path!).readAsBytes());
+    if (bytes == null || bytes.isEmpty) throw const FormatException('Could not read the selected file.');
+
     String text;
-    if (name.endsWith('.pdf')) {
-      final bytes = file.bytes ?? await File(file.path!).readAsBytes();
+    if (lowerName.endsWith('.pdf')) {
       final document = PdfDocument(inputBytes: bytes);
       try {
         text = PdfTextExtractor(document).extractText();
@@ -62,7 +78,9 @@ class IvOptionsParser {
       }
     } else {
       final path = file.path;
-      if (path == null) throw const FormatException('Could not read the selected image.');
+      if (path == null) {
+        throw const FormatException('Could not access this image for OCR. Please choose the image again.');
+      }
       final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       try {
         final recognized = await recognizer.processImage(InputImage.fromFilePath(path));
@@ -71,34 +89,54 @@ class IvOptionsParser {
         await recognizer.close();
       }
     }
-    return parseText(text);
+
+    // Only replace the previous saved source/plan after the new file parses successfully.
+    final plan = parseText(text);
+    await _persistSourceFile(name, bytes);
+    await saveApprovedPlan(plan);
+    return plan;
+  }
+
+  Future<void> _persistSourceFile(String name, Uint8List bytes) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final extension = name.contains('.') ? name.split('.').last.toLowerCase() : 'bin';
+    final savedFile = File('${directory.path}/iv_options_source.$extension');
+    await savedFile.writeAsBytes(bytes, flush: true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(sourcePathKey, savedFile.path);
+    await prefs.setString(sourceNameKey, name);
   }
 
   OptionsZonePlan parseText(String source) {
-    final text = source.replaceAll(',', '').replaceAll(RegExp(r'[\t ]+'), ' ');
+    final text = source.replaceAll(',', '').replaceAll(RegExp(r'[\\t ]+'), ' ');
     final values = <double>{};
-    // Gold strike prices are commonly four digits; avoid deltas/percentages.
-    for (final match in RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text)) {
+    // Collect candidate gold strikes; the center/middle strike is deliberately not a zone.
+    for (final match in RegExp(r'(?<![\\d.])(\\d{4,5}(?:\\.\\d+)?)(?![\\d.])').allMatches(text)) {
       final value = double.tryParse(match.group(1)!);
       if (value != null && value >= 1000 && value <= 10000) values.add(value);
     }
     if (values.length < 7) {
       throw FormatException('Only ${values.length} possible gold strikes were found. Upload a clearer image/PDF with at least seven strike prices.');
     }
+
     final sorted = values.toList()..sort();
-    final spotMatch = RegExp(r'(?:XAU\s*/?\s*USD|GOLD|SPOT)\D{0,30}(\d{4}(?:\.\d+)?)', caseSensitive: false).firstMatch(text);
+    final spotMatch = RegExp(r'(?:XAU\\s*/?\\s*USD|GOLD|SPOT)\\D{0,30}(\\d{4}(?:\\.\\d+)?)', caseSensitive: false).firstMatch(text);
     final spot = spotMatch == null ? null : double.tryParse(spotMatch.group(1)!);
-    // Select seven strikes nearest spot, then exclude the middle strike.
     final anchor = spot ?? sorted[sorted.length ~/ 2];
-    final nearest = sorted.toList()..sort((a, b) => (a - anchor).abs().compareTo((b - anchor).abs()));
+    final nearest = sorted.toList()..sort((a, b) {
+      final distance = (a - anchor).abs().compareTo((b - anchor).abs());
+      return distance != 0 ? distance : a.compareTo(b);
+    });
     final selected = nearest.take(7).toList()..sort();
-    if (selected.length < 7) {
-      throw const FormatException('Seven distinct gold strike prices are required to exclude the middle strike and create six zones.');
+    if (selected.length != 7) {
+      throw const FormatException('Seven distinct gold strikes are required to exclude the middle strike and create six zones.');
     }
-    final reference = spot ?? selected[selected.length ~/ 2];
+
+    // Exclude the central strike completely: only the three strikes below and above it become zones.
     final middleIndex = selected.length ~/ 2;
     final lower = selected.take(middleIndex).toList();
     final upper = selected.skip(middleIndex + 1).toList();
+    final reference = spot ?? selected[middleIndex];
     final zones = <OptionsZone>[
       OptionsZone(label: 'R3', price: upper[2], isResistance: true),
       OptionsZone(label: 'R2', price: upper[1], isResistance: true),
@@ -107,7 +145,7 @@ class IvOptionsParser {
       OptionsZone(label: 'S2', price: lower[1], isResistance: false),
       OptionsZone(label: 'S3', price: lower[0], isResistance: false),
     ];
-    final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\s*[: ]?\s*)(\d{4}[-/]\d{2}[-/]\d{2})', caseSensitive: false).firstMatch(text);
+    final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\\s*[: ]?\\s*)(\\d{4}[-/]\\d{2}[-/]\\d{2})', caseSensitive: false).firstMatch(text);
     return OptionsZonePlan(zones: zones, referencePrice: reference, expiry: expiryMatch?.group(1), sourceText: text);
   }
 
@@ -119,6 +157,13 @@ class IvOptionsParser {
   Future<void> clearPlan() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(storageKey);
+    final prefsPath = prefs.getString(sourcePathKey);
+    if (prefsPath != null) {
+      final source = File(prefsPath);
+      if (await source.exists()) await source.delete();
+    }
+    await prefs.remove(sourcePathKey);
+    await prefs.remove(sourceNameKey);
   }
 
   Future<Map<String, dynamic>?> loadSavedPlan() async {
@@ -126,5 +171,10 @@ class IvOptionsParser {
     final raw = prefs.getString(storageKey);
     if (raw == null) return null;
     try { return Map<String, dynamic>.from(jsonDecode(raw) as Map); } catch (_) { return null; }
+  }
+
+  Future<String?> loadSavedSourceName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(sourceNameKey);
   }
 }
