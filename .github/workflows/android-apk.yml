@@ -245,20 +245,49 @@ jobs:
         working-directory: .
         run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
 
-      - name: Verify signed APK
+      - name: Verify release APK identity, version, signature, and checksum
         working-directory: .
         run: |
           set -euo pipefail
-          test -s Pips-Miner-release.apk
+          APK="Pips-Miner-release.apk"
+          test -s "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          APKANALYZER="$(find "$ANDROID_HOME" -type f -name apkanalyzer | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
-          "$APKSIGNER" verify --verbose Pips-Miner-release.apk
+          test -n "$APKANALYZER"
+
+          "$APKSIGNER" verify --verbose "$APK"
+          APP_ID="$("$APKANALYZER" manifest application-id "$APK")"
+          VERSION_CODE="$("$APKANALYZER" manifest version-code "$APK")"
+          VERSION_NAME="$("$APKANALYZER" manifest version-name "$APK")"
+
+          echo "APK applicationId: $APP_ID"
+          echo "APK versionName: $VERSION_NAME"
+          echo "APK versionCode: $VERSION_CODE"
+          "$APKSIGNER" verify --print-certs "$APK"
+
+          test "$APP_ID" = "com.example.pips_miner" || {
+            echo "ERROR: Unexpected application ID: $APP_ID"
+            exit 1
+          }
+          test "$VERSION_CODE" = "$GITHUB_RUN_NUMBER" || {
+            echo "ERROR: APK versionCode does not match this workflow run number"
+            exit 1
+          }
+          test "$VERSION_NAME" = "1.0.$GITHUB_RUN_NUMBER" || {
+            echo "ERROR: APK versionName does not match this workflow run number"
+            exit 1
+          }
+
+          sha256sum "$APK" | tee Pips-Miner-release.apk.sha256
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Pips-Miner-v1.0.${{ github.run_number }}-${{ github.run_id }}
-          path: Pips-Miner-release.apk
+          path: |
+            Pips-Miner-release.apk
+            Pips-Miner-release.apk.sha256
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -271,5 +300,7 @@ jobs:
           name: Pips Miner v1.0.${{ github.run_number }}
           generate_release_notes: true
           make_latest: true
-          files: Pips-Miner-release.apk
+          files: |
+            Pips-Miner-release.apk
+            Pips-Miner-release.apk.sha256
           token: ${{ github.token }}
