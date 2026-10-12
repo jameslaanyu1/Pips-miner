@@ -366,7 +366,7 @@ class VelocityReversalEngine {
       final level = zone['price'] as double;
       if (!near(level)) continue;
       _ivResistanceTested = true;
-      if (!_ivBreakoutConfirmed && previous > 0 && current < 0 && price <= level && signal.expanded) {
+      if (!_ivBreakoutConfirmed && previous > 0 && current < 0 && price <= level) {
         _ivBias = -1;
         _ivBreakoutConfirmed = false;
         _saveIvState();
@@ -546,7 +546,12 @@ class VelocityReversalEngine {
       final pipSize = await _pipSizeFromSpecification(specification);
       final stopDistance = (riskDistancePips ?? config.reversalPips) * pipSize;
       final lossPerLot = (stopDistance / tickSize) * tickValue;
-      if (lossPerLot > 0) desiredVolume = (riskAmount / lossPerLot).clamp(minVolume, maxVolume);
+      if (lossPerLot <= 0) throw Exception('Invalid calculated loss per lot.');
+      final riskVolume = riskAmount / lossPerLot;
+      if (riskVolume < minVolume) {
+        throw Exception('Broker minimum lot exceeds the configured risk limit; refusing the trade.');
+      }
+      desiredVolume = riskVolume.clamp(minVolume, maxVolume).toDouble();
     }
     desiredVolume = _floorToStep(desiredVolume, volumeStep);
     if (desiredVolume < minVolume) desiredVolume = minVolume;
@@ -554,12 +559,14 @@ class VelocityReversalEngine {
     try {
       var margin = await api.calculateMargin(symbol: config.symbol, volume: desiredVolume, buy: buy, openPrice: _normalizePrice(buy ? ask : bid));
       var requiredMargin = _number(margin['margin']);
-      if (requiredMargin != null && requiredMargin > marginBudget) {
+      if (requiredMargin == null || requiredMargin < 0) throw Exception('Broker did not return a valid margin estimate.');
+      if (requiredMargin > marginBudget) {
         desiredVolume = _floorToStep(desiredVolume * marginBudget / requiredMargin, volumeStep);
         if (desiredVolume < minVolume) throw Exception('Broker minimum volume exceeds the 50% free-margin safety cap.');
         margin = await api.calculateMargin(symbol: config.symbol, volume: desiredVolume, buy: buy, openPrice: _normalizePrice(buy ? ask : bid));
         requiredMargin = _number(margin['margin']);
-        if (requiredMargin != null && requiredMargin > marginBudget) throw Exception('Calculated position exceeds the 50% free-margin safety cap.');
+        if (requiredMargin == null || requiredMargin < 0) throw Exception('Broker did not return a valid margin estimate.');
+        if (requiredMargin > marginBudget) throw Exception('Calculated position exceeds the 50% free-margin safety cap.');
       }
     } catch (e) {
       rethrow; // Do not silently bypass margin/risk checks by falling back to minimum lot.
