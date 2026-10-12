@@ -29,6 +29,12 @@ class VelocityReversalEngine {
   double? _lastReversalPrice;
   double? _optionsExitPrice;
   bool _optionsTrade = false;
+  String? _ivHedgePositionId;
+  String? _ivHedgeParentId;
+  double? _ivEntryPrice;
+  bool _ivResistanceTested = false;
+  int _ivBias = 1;
+  static const String _ivStateKey = 'pips_miner_iv_trade_state';
 
   bool get running => _running;
   String? get activePositionId => _activePositionId;
@@ -86,21 +92,10 @@ class VelocityReversalEngine {
     );
 
     if (_activePositionId != null) {
-      if (plan != null && _optionsTrade && !signal.velocityExpanded) {
-        final positions = await api.positions();
-        final active = positions.whereType<Map>()
-            .map((p) => Map<String, dynamic>.from(p))
-            .where((p) => p['id']?.toString() == _activePositionId)
-            .firstOrNull;
-        final profit = active == null ? null : _number(
-          active['profit'] ?? active['unrealizedProfit'] ?? active['currentProfit'] ?? active['floatingProfit']);
-        if (profit != null && profit > 0) {
-          await api.closePosition(_activePositionId!);
-          _activePositionId = null;
-          _activeDirection = null;
-          _optionsExitPrice = null;
-          _optionsTrade = false;
-        }
+      if (plan != null && _optionsTrade) {
+        _busy = true;
+        try { await _manageOptionsPosition(plan, liveMid, signal); }
+        finally { _busy = false; }
       }
       return;
     }
@@ -111,8 +106,9 @@ class VelocityReversalEngine {
       _busy = true;
       try {
         final buy = zoneSignal['buy'] as bool;
-        _optionsExitPrice = null; // Scalps exit on profitable velocity fade, not at the next zone.
+        _optionsExitPrice = null;
         _optionsTrade = true;
+        await _restoreIvState();
         _activeVolume = await _calculatePositionVolume(buy: buy);
         await api.marketOrder(
           symbol: config.symbol,
@@ -135,9 +131,12 @@ class VelocityReversalEngine {
             _activeDirection = buy ? EnginePositionDirection.buy : EnginePositionDirection.sell;
             final actualVolume = _number(match['volume'] ?? match['lots'] ?? match['currentVolume']);
             if (actualVolume != null && actualVolume > 0) _activeVolume = actualVolume;
+            _ivEntryPrice = _number(match['openPrice'] ?? match['price']);
+            await _saveIvState();
             return;
           }
         }
+        _optionsTrade = false;
         throw Exception('IV-zone order sent but the position was not confirmed.');
       } finally {
         _busy = false;
@@ -212,34 +211,174 @@ class VelocityReversalEngine {
     if (raw == null || raw.isEmpty) return null;
     try { return Map<String, dynamic>.from(jsonDecode(raw) as Map); } catch (_) { return null; }
   }
+  Future<void> _restoreIvState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_ivStateKey);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final state = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      _ivBias = (state['bias'] as num?)?.toInt() ?? _ivBias;
+      _ivResistanceTested = state['resistanceTested'] == true;
+      _ivHedgePositionId = state['hedgePositionId']?.toString();
+      _ivHedgeParentId = state['hedgeParentId']?.toString();
+      _ivEntryPrice = _number(state['entryPrice']) ?? _ivEntryPrice;
+    } catch (_) {}
+  }
+
+  Future<void> _saveIvState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_ivStateKey, jsonEncode({
+      'bias': _ivBias, 'resistanceTested': _ivResistanceTested,
+      'hedgePositionId': _ivHedgePositionId, 'hedgeParentId': _ivHedgeParentId,
+      'entryPrice': _ivEntryPrice,
+    }));
+  }
+
+  Future<void> _clearIvTradeState() async {
+    _activePositionId = null;
+    _activeDirection = null;
+    _ivEntryPrice = null;
+    _ivHedgePositionId = null;
+    _ivHedgeParentId = null;
+    _optionsExitPrice = null;
+    _optionsTrade = false;
+    await _saveIvState();
+  }
+
+  double _positionProfit(Map<String, dynamic> p) =>
+      (_number(p['profit'] ?? p['unrealizedProfit'] ?? p['currentProfit'] ?? p['floatingProfit']) ?? 0) +
+      (_number(p['swap']) ?? 0) + (_number(p['commission']) ?? 0);
+
+  Future<void> _manageOptionsPosition(
+    Map<String, dynamic> plan, double price, VelocityExpansionResult signal,
+  ) async {
+    await _restoreIvState();
+    final all = (await api.positions()).whereType<Map>()
+        .map((p) => Map<String, dynamic>.from(p))
+        .where(_isStrategyPosition).where((p) => p['symbol']?.toString() == config.symbol).toList();
+    final active = all.where((p) => p['id']?.toString() == _activePositionId).firstOrNull;
+    if (active == null) {
+      await _clearIvTradeState();
+      return;
+    }
+    final hedge = all.where((p) => p['id']?.toString() == _ivHedgePositionId ||
+        (p['clientId']?.toString() ?? '').contains('_IV_HEDGE_')).firstOrNull;
+    if (hedge != null) {
+      _ivHedgePositionId = hedge['id']?.toString();
+      _ivHedgeParentId = active['id']?.toString();
+      final basketProfit = all.fold<double>(0, (sum, p) => sum + _positionProfit(p));
+      await _saveIvState();
+      if (basketProfit >= 0) {
+        final ids = all.map((p) => p['id']?.toString()).whereType<String>().toSet();
+        for (final id in ids) { await api.closePosition(id); }
+        final remaining = (await api.positions()).whereType<Map>()
+            .map((p) => Map<String, dynamic>.from(p)).where(_isStrategyPosition)
+            .where((p) => p['symbol']?.toString() == config.symbol)
+            .where((p) => ids.contains(p['id']?.toString())).toList();
+        if (remaining.isEmpty) await _clearIvTradeState();
+      }
+      return; // No new trades while a hedge basket is unresolved.
+    }
+
+    final direction = _positionDirection(active);
+    final openPrice = _number(active['openPrice'] ?? active['price']) ?? _ivEntryPrice;
+    if (direction == null || openPrice == null) return;
+    _ivEntryPrice = openPrice;
+    final pipSize = await _pipSize();
+    final favorable = direction == EnginePositionDirection.buy ? price - openPrice : openPrice - price;
+    final adverse = -favorable;
+    if (favorable >= 350 * pipSize) {
+      final id = active['id']?.toString();
+      if (id == null) return;
+      await api.closePosition(id);
+      final remaining = (await api.positions()).whereType<Map>()
+          .map((p) => Map<String, dynamic>.from(p)).any((p) => p['id']?.toString() == id);
+      if (!remaining) await _clearIvTradeState();
+      return;
+    }
+    if (adverse >= 200 * pipSize) {
+      final net = all.fold<double>(0, (sum, p) {
+        final volume = _number(p['volume'] ?? p['lots'] ?? p['currentVolume']) ?? 0;
+        final d = _positionDirection(p);
+        return sum + (d == EnginePositionDirection.buy ? volume : d == EnginePositionDirection.sell ? -volume : 0);
+      });
+      if (net.abs() <= 0) return;
+      final hedgeBuy = net < 0;
+      final riskLimited = await _calculatePositionVolume(buy: hedgeBuy, riskDistancePips: 200);
+      final spec = await api.symbolSpecification(config.symbol);
+      final minVolume = _number(spec['minVolume'] ?? spec['volumeMin']) ?? config.minimumVolume;
+      final step = _number(spec['volumeStep'] ?? spec['lotStep']) ?? config.volumeStep;
+      final hedgeVolume = _floorToStep(net.abs().clamp(0.0, riskLimited), step);
+      if (hedgeVolume < minVolume) return;
+      await api.marketOrder(symbol: config.symbol, volume: hedgeVolume, buy: hedgeBuy,
+        clientId: '${_clientPrefix}_IV_HEDGE_${DateTime.now().microsecondsSinceEpoch}', magic: magic);
+      for (var attempt = 0; attempt < 5; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        final refreshed = (await api.positions()).whereType<Map>()
+            .map((p) => Map<String, dynamic>.from(p)).where(_isStrategyPosition)
+            .where((p) => (p['clientId']?.toString() ?? '').contains('_IV_HEDGE_'))
+            .where((p) => p['symbol']?.toString() == config.symbol).firstOrNull;
+        if (refreshed != null) {
+          _ivHedgePositionId = refreshed['id']?.toString();
+          _ivHedgeParentId = active['id']?.toString();
+          await _saveIvState();
+          return;
+        }
+      }
+      throw Exception('IV hedge request sent but broker confirmation was not received; verify account positions before retrying.');
+    }
+    await _saveIvState();
+  }
+
 
   Map<String, dynamic>? _zoneEntry(Map<String, dynamic> plan, double price, VelocityExpansionResult signal) {
     final rawZones = plan['zones'];
-    if (rawZones is! List) return null;
+    if (rawZones is! List || _liveCandles.length < 3) return null;
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
-      .map((z) => {'label': z['label']?.toString() ?? '', 'price': (z['price'] as num?)?.toDouble(), 'isResistance': z['isResistance'] == true})
-      .where((z) => z['price'] != null).toList();
-    if (zones.length != 6) return null;
+      .map((z) => {'label': z['label']?.toString() ?? '', 'price': _number(z['price']), 'isResistance': z['isResistance'] == true})
+      .where((z) => z['price'] != null && (z['price'] as double) > 0).toList();
     final supports = zones.where((z) => z['isResistance'] == false).toList()
       ..sort((a,b) => (b['price'] as double).compareTo(a['price'] as double));
     final resistances = zones.where((z) => z['isResistance'] == true).toList()
       ..sort((a,b) => (a['price'] as double).compareTo(b['price'] as double));
-    if (!signal.expanded || signal.direction == VelocityDirection.neutral) return null;
-    for (final z in supports) {
-      final level = z['price'] as double;
-      if ((price - level).abs() / level <= 0.0005) {
-        final target = resistances.where((r) => (r['price'] as double) > price).firstOrNull;
-        if (target != null && signal.direction == VelocityDirection.bullish) return {'buy': true};
+    if (supports.length != 3 || resistances.length != 3) return null;
+    final previous = _liveCandles[_liveCandles.length - 2].close - _liveCandles[_liveCandles.length - 3].close;
+    final current = signal.currentVelocity;
+    final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
+    bool near(double level) => (price - level).abs() / level <= tolerance;
+    final topResistance = resistances.last['price'] as double;
+
+    if (price > topResistance * (1 + tolerance)) {
+      _ivBias = 1;
+      _ivResistanceTested = true;
+      _saveIvState();
+      if (near(topResistance) && current > 0 && signal.expanded) return {'buy': true};
+      return null; // breakout continuation only on a retest; never chase far above the zone.
+    }
+    for (final zone in resistances) {
+      final level = zone['price'] as double;
+      if (!near(level)) continue;
+      _ivResistanceTested = true;
+      if (previous > 0 && current < 0 && price <= level && signal.expanded) {
+        _ivBias = -1;
+        _saveIvState();
+        return {'buy': false};
+      }
+      return null;
+    }
+    if (_ivBias >= 0) {
+      for (final zone in supports) {
+        final level = zone['price'] as double;
+        // Previous candle moved down; live tick has turned up: downward impulse faded.
+        if (near(level) && previous < 0 && current > 0 && price >= level) return {'buy': true};
+      }
+    } else {
+      for (final zone in supports) {
+        final level = zone['price'] as double;
+        if (near(level) && previous < 0 && current < 0 && signal.expanded) return {'buy': false};
       }
     }
-    for (final z in resistances) {
-      final level = z['price'] as double;
-      if ((price - level).abs() / level <= 0.0005) {
-        final target = supports.where((r) => (r['price'] as double) < price).firstOrNull;
-        if (target != null && signal.direction == VelocityDirection.bearish) return {'buy': false};
-      }
-    }
-    return null;
+    return null; // Explicit no-trade area between zones.
   }
 
   Future<void> cleanupManagedExposure() async {
@@ -298,6 +437,7 @@ class VelocityReversalEngine {
         .map((o) => Map<String, dynamic>.from(o)).where(_isStrategyOrder)
         .where((o) => o['symbol'] == config.symbol).toList();
 
+    await _restoreIvState();
     final active = _findActivePosition(strategyPositions);
     if (active != null) {
       final detectedDirection = _positionDirection(active);
@@ -311,6 +451,11 @@ class VelocityReversalEngine {
         _activeDirection = detectedDirection;
         final detectedVolume = _number(active['volume'] ?? active['lots'] ?? active['currentVolume']);
         if (detectedVolume != null && detectedVolume > 0) _activeVolume = detectedVolume;
+        final clientId = active['clientId']?.toString() ?? '';
+        if (clientId.contains('_IV_')) {
+          _optionsTrade = true;
+          _ivEntryPrice = _number(active['openPrice'] ?? active['price']) ?? _ivEntryPrice;
+        }
       }
     }
 
@@ -378,11 +523,14 @@ class VelocityReversalEngine {
     if (bid == null || ask == null || bid <= 0 || ask <= 0) throw Exception('MetaApi did not return a valid bid/ask for ${config.symbol}.');
     final tickSize = _number(specification['tickSize'] ?? specification['tradeTickSize'] ?? specification['point']);
     final tickValue = _number(specification['tradeTickValue'] ?? specification['tickValue'] ?? specification['tickValueLoss'] ?? specification['tickValueProfit'] ?? specification['tradeTickValueLoss'] ?? specification['tradeTickValueProfit'] ?? price['lossTickValue'] ?? price['profitTickValue']);
+    if (tickSize == null || tickSize <= 0 || tickValue == null || tickValue <= 0) {
+      throw Exception('Broker tick size/value unavailable; refusing to guess a risk-based volume.');
+    }
     double desiredVolume = minVolume;
-    if (tickSize != null && tickSize > 0 && tickValue != null && tickValue > 0) {
+    if (tickSize > 0 && tickValue > 0) {
       final riskAmount = balance * (config.riskPercent / 100.0);
       final pipSize = await _pipSizeFromSpecification(specification);
-      final stopDistance = config.reversalPips * pipSize;
+      final stopDistance = (riskDistancePips ?? config.reversalPips) * pipSize;
       final lossPerLot = (stopDistance / tickSize) * tickValue;
       if (lossPerLot > 0) desiredVolume = (riskAmount / lossPerLot).clamp(minVolume, maxVolume);
     }
@@ -400,8 +548,7 @@ class VelocityReversalEngine {
         if (requiredMargin != null && requiredMargin > marginBudget) throw Exception('Calculated position exceeds the 50% free-margin safety cap.');
       }
     } catch (e) {
-      if (e.toString().contains('50% free-margin safety cap')) rethrow;
-      desiredVolume = minVolume;
+      rethrow; // Do not silently bypass margin/risk checks by falling back to minimum lot.
     }
     return double.parse(desiredVolume.toStringAsFixed(8));
   }
