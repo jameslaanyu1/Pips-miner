@@ -31,7 +31,7 @@ class MetaApiStreamingService {
     _socket = socket;
     var marketSubscribed = false;
 
-    void fail(Object error) {
+    void fail(dynamic error) {
       _events.add({'type': 'error', 'message': error.toString()});
       if (!ready.isCompleted) ready.completeError(error);
     }

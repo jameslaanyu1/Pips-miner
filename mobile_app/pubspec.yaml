@@ -14,6 +14,11 @@ dependencies:
   flutter:
     sdk: flutter
   
+  # IV options PDF / screenshot parsing
+  file_picker: ^10.3.3
+  google_mlkit_text_recognition: ^0.15.0
+  syncfusion_flutter_pdf: ^28.2.12
+
   # API & Networking
   http: ^1.1.0
   dio: ^5.3.0

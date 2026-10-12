@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/bot_provider.dart';
+import 'iv_options_screen.dart';
 import '../theme/app_theme.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -10,8 +11,10 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<BotProvider>(builder: (context, bot, _) => Scaffold(backgroundColor: AppTheme.darkBg, body: SafeArea(child: CustomScrollView(slivers: [SliverPadding(padding: const EdgeInsets.fromLTRB(18, 18, 18, 32), sliver: SliverList(delegate: SliverChildListDelegate([_header(bot), const SizedBox(height: 18), _accountCard(bot), const SizedBox(height: 10), _accountModeDisplay(bot), const SizedBox(height: 14), _marketCard(bot), const SizedBox(height: 14), _positionCard(bot), const SizedBox(height: 14), _botControl(bot)])))]))));
+    return Consumer<BotProvider>(builder: (context, bot, _) => Scaffold(backgroundColor: AppTheme.darkBg, body: SafeArea(child: CustomScrollView(slivers: [SliverPadding(padding: const EdgeInsets.fromLTRB(18, 18, 18, 32), sliver: SliverList(delegate: SliverChildListDelegate([_header(bot), const SizedBox(height: 18), _accountCard(bot), const SizedBox(height: 10), _accountModeDisplay(bot), const SizedBox(height: 14), _marketCard(bot), const SizedBox(height: 14), _positionCard(bot), const SizedBox(height: 14), _botControl(bot), const SizedBox(height: 12), _ivOptionsButton(context)])))]))));
   }
+
+  Widget _ivOptionsButton(BuildContext context) => SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IvOptionsScreen())), icon: const Icon(Icons.analytics_outlined), label: const Text('IV OPTIONS • IMPORT ZONES')));
 
   Widget _header(BotProvider bot) => Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.accentColor.withOpacity(.28))), clipBehavior: Clip.antiAlias, child: Image.asset('assets/pips_miner_pro_icon.png', fit: BoxFit.cover)), const SizedBox(width: 12), const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Pips-Miner', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 1.0)), SizedBox(height: 2), Text('life changing pips', style: TextStyle(color: AppTheme.accentColor, fontSize: 9, fontWeight: FontWeight.w700, letterSpacing: .8))])), Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7), decoration: BoxDecoration(color: bot.isConnected ? AppTheme.successColor.withOpacity(.10) : Colors.white.withOpacity(.05), borderRadius: BorderRadius.circular(20), border: Border.all(color: bot.isConnected ? AppTheme.successColor.withOpacity(.30) : Colors.white12)), child: Row(children: [Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: bot.isConnected ? AppTheme.successColor : Colors.white30)), const SizedBox(width: 6), Text(bot.isConnected ? 'ONLINE' : 'OFFLINE', style: TextStyle(color: bot.isConnected ? AppTheme.successColor : Colors.white54, fontSize: 9, fontWeight: FontWeight.w800))]))]);
 

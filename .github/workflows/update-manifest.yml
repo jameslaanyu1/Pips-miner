@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   update-manifest:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
@@ -18,17 +18,40 @@ jobs:
         with:
           ref: main
 
+      - name: Verify published release and APK asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          set -euo pipefail
+          TAG="v1.0.${RUN_NUMBER}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,assets > release.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          release = json.loads(Path('release.json').read_text())
+          if release.get('tagName') != f"v1.0.{__import__('os').environ['RUN_NUMBER']}":
+              raise SystemExit('ERROR: release tag does not match successful workflow run')
+          assets = release.get('assets', [])
+          if not any(asset.get('name') == 'Pips-Miner-release.apk' and asset.get('size', 0) > 0 for asset in assets):
+              raise SystemExit('ERROR: published release does not contain a non-empty Pips-Miner-release.apk')
+          PY
+
       - name: Write latest release manifest
         env:
           RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
         run: |
-          cat > update.json <<EOF
-          {
-            "version": "1.0.${RUN_NUMBER}",
-            "download_url": "https://github.com/jameslaanyu1/Pips-miner/releases/latest/download/Pips-Miner-release.apk",
-            "release_url": "https://github.com/jameslaanyu1/Pips-miner/releases/latest"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          run_number = os.environ['RUN_NUMBER']
+          manifest = {
+              "version": f"1.0.{run_number}",
+              "download_url": f"https://github.com/jameslaanyu1/Pips-miner/releases/download/v1.0.{run_number}/Pips-Miner-release.apk",
+              "release_url": "https://github.com/jameslaanyu1/Pips-miner/releases/latest",
           }
-          EOF
+          Path('update.json').write_text(json.dumps(manifest, indent=2) + chr(10))
+          PY
 
       - name: Commit manifest without triggering another APK build
         run: |

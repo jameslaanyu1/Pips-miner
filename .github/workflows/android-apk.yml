@@ -2,7 +2,7 @@ name: Build and Release Pips Miner APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/iv-options-zone-parser]
   workflow_dispatch:
 
 permissions:
@@ -66,12 +66,34 @@ jobs:
               compile_options = '''\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n        isCoreLibraryDesugaringEnabled = true\n    }\n'''
               text = text[:block_start] + compile_options + text[block_start:]
 
+          # Ensure a dependencies block exists; newer Flutter templates may omit it.
+          if not re.search(r'(?m)^dependencies\s*\{', text):
+              text += '\n\ndependencies {\n}\n'
+
+          # google_mlkit_text_recognition references all script option classes,
+          # so include the matching ML Kit artifacts to satisfy R8 in release builds.
+          mlkit_deps = [
+              '    implementation("com.google.mlkit:text-recognition:16.0.1")',
+              '    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")',
+              '    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")',
+              '    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")',
+              '    implementation("com.google.mlkit:text-recognition-korean:16.0.1")',
+          ]
+          if 'com.google.mlkit:text-recognition-chinese:' not in text:
+              text = re.sub(
+                  r'(?m)^dependencies\s*\{',
+                  'dependencies {\n' + '\n'.join(mlkit_deps),
+                  text,
+                  count=1,
+              )
+
           if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in text:
-              dependency = 'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n'
-              if re.search(r'(?m)^dependencies\s*\{', text):
-                  text = re.sub(r'(?m)^dependencies\s*\{', dependency, text, count=1)
-              else:
-                  text += '\n' + dependency + '}\n'
+              text = re.sub(
+                  r'(?m)^dependencies\s*\{',
+                  'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                  text,
+                  count=1,
+              )
 
           text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36', 1)
           text = re.sub(r'(?m)^(\s*)namespace\s*=\s*"[^"]+"', r'\1namespace = "com.example.pips_miner"', text, count=1)
@@ -164,13 +186,32 @@ jobs:
           import re
           path = Path('android/app/build.gradle.kts')
           text = path.read_text()
-          imports = '''import java.util.Properties\nimport java.io.FileInputStream\nval signingProperties = Properties()\nval signingPropertiesFile = rootProject.file("key.properties")\nif (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))\n'''
+          imports = '''import java.util.Properties
+          import java.io.FileInputStream
+          val signingProperties = Properties()
+          val signingPropertiesFile = rootProject.file("key.properties")
+          if (signingPropertiesFile.exists()) signingProperties.load(FileInputStream(signingPropertiesFile))
+          '''
           if 'signingPropertiesFile' not in text:
               text = imports + text
           if 'create("pipsMinerRelease")' not in text:
-              signing = '''\n    signingConfigs {\n        create("pipsMinerRelease") {\n            keyAlias = signingProperties.getProperty("keyAlias")\n            keyPassword = signingProperties.getProperty("keyPassword")\n            storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }\n            storePassword = signingProperties.getProperty("storePassword")\n        }\n    }\n'''
+              signing = '''
+              signingConfigs {
+                  create("pipsMinerRelease") {
+                      keyAlias = signingProperties.getProperty("keyAlias")
+                      keyPassword = signingProperties.getProperty("keyPassword")
+                      storeFile = signingProperties.getProperty("storeFile")?.let { rootProject.file(it) }
+                      storePassword = signingProperties.getProperty("storePassword")
+                  }
+              }
+              '''
               text = text.replace('android {', 'android {' + signing, 1)
-          text = re.sub(r'(?m)^\s*signingConfig\s*=.*$', '            signingConfig = signingConfigs.getByName("pipsMinerRelease")', text)
+          text = re.sub(
+              r'(?m)^\s*signingConfig\s*=.*$',
+              '            signingConfig = signingConfigs.getByName("pipsMinerRelease")',
+              text,
+              count=1,
+          )
           if 'signingConfig = signingConfigs.getByName("pipsMinerRelease")' not in text:
               text = text.replace('release {', 'release {\n            signingConfig = signingConfigs.getByName("pipsMinerRelease")', 1)
           path.write_text(text)
@@ -182,29 +223,84 @@ jobs:
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
+      - name: Run Flutter tests
+        run: flutter test
+
       - name: Analyze Flutter project
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
 
+      - name: Verify APK output
+        working-directory: .
+        run: |
+          set -euo pipefail
+          APK="mobile_app/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          file "$APK"
+          sha256sum "$APK"
+
       - name: Prepare release APK
         working-directory: .
         run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
 
+      - name: Verify release APK identity, version, signature, and checksum
+        working-directory: .
+        run: |
+          set -euo pipefail
+          APK="Pips-Miner-release.apk"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          APKANALYZER="$(find "$ANDROID_HOME" -type f -name apkanalyzer | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          test -n "$APKANALYZER"
+
+          "$APKSIGNER" verify --verbose "$APK"
+          APP_ID="$("$APKANALYZER" manifest application-id "$APK")"
+          VERSION_CODE="$("$APKANALYZER" manifest version-code "$APK")"
+          VERSION_NAME="$("$APKANALYZER" manifest version-name "$APK")"
+
+          echo "APK applicationId: $APP_ID"
+          echo "APK versionName: $VERSION_NAME"
+          echo "APK versionCode: $VERSION_CODE"
+          "$APKSIGNER" verify --print-certs "$APK"
+
+          test "$APP_ID" = "com.example.pips_miner" || {
+            echo "ERROR: Unexpected application ID: $APP_ID"
+            exit 1
+          }
+          test "$VERSION_CODE" = "$GITHUB_RUN_NUMBER" || {
+            echo "ERROR: APK versionCode does not match this workflow run number"
+            exit 1
+          }
+          test "$VERSION_NAME" = "1.0.$GITHUB_RUN_NUMBER" || {
+            echo "ERROR: APK versionName does not match this workflow run number"
+            exit 1
+          }
+
+          sha256sum "$APK" | tee Pips-Miner-release.apk.sha256
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Pips-Miner-v1.0.${{ github.run_number }}
-          path: Pips-Miner-release.apk
+          name: Pips-Miner-v1.0.${{ github.run_number }}-${{ github.run_id }}
+          path: |
+            Pips-Miner-release.apk
+            Pips-Miner-release.apk.sha256
           if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
 
       - name: Publish GitHub release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Pips Miner v1.0.${{ github.run_number }}
           generate_release_notes: true
           make_latest: true
-          files: Pips-Miner-release.apk
+          files: |
+            Pips-Miner-release.apk
+            Pips-Miner-release.apk.sha256
           token: ${{ github.token }}
