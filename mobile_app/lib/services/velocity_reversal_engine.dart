@@ -103,7 +103,7 @@ class VelocityReversalEngine {
 
     if (plan != null) {
       await _restoreIvState();
-      final zoneSignal = _zoneEntry(plan, liveMid, signal);
+      final zoneSignal = await _zoneEntry(plan, liveMid, signal);
       if (zoneSignal == null) return;
       _busy = true;
       try {
@@ -335,7 +335,7 @@ class VelocityReversalEngine {
   }
 
 
-  Map<String, dynamic>? _zoneEntry(Map<String, dynamic> plan, double price, VelocityExpansionResult signal) {
+  Future<Map<String, dynamic>?> _zoneEntry(Map<String, dynamic> plan, double price, VelocityExpansionResult signal) async {
     final rawZones = plan['zones'];
     if (rawZones is! List || _liveCandles.length < 3) return null;
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
@@ -356,7 +356,7 @@ class VelocityReversalEngine {
       _ivBias = 1;
       _ivBreakoutConfirmed = true;
       _ivResistanceTested = true;
-      _saveIvState();
+      await _saveIvState();
       return null; // Confirm the break, then wait for a retest rather than chase.
     }
     if (_ivBreakoutConfirmed && _ivBias > 0 && near(topResistance) && current > 0) {
@@ -369,7 +369,7 @@ class VelocityReversalEngine {
       if (!_ivBreakoutConfirmed && previous > 0 && current < 0 && price <= level) {
         _ivBias = -1;
         _ivBreakoutConfirmed = false;
-        _saveIvState();
+        await _saveIvState();
         return {'buy': false};
       }
       return null;
