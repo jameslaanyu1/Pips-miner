@@ -233,16 +233,37 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release --build-name="1.0.${GITHUB_RUN_NUMBER}" --build-number="${GITHUB_RUN_NUMBER}"
 
+      - name: Verify APK output
+        working-directory: .
+        run: |
+          set -euo pipefail
+          APK="mobile_app/build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$APK"
+          file "$APK"
+          sha256sum "$APK"
+
       - name: Prepare release APK
         working-directory: .
         run: cp mobile_app/build/app/outputs/flutter-apk/app-release.apk Pips-Miner-release.apk
 
+      - name: Verify signed production APK
+        if: github.ref == 'refs/heads/main'
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test -s Pips-Miner-release.apk
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose Pips-Miner-release.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Pips-Miner-v1.0.${{ github.run_number }}
+          name: Pips-Miner-v1.0.${{ github.run_number }}-${{ github.ref_name }}
           path: Pips-Miner-release.apk
           if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
 
       - name: Publish GitHub release
         if: github.ref == 'refs/heads/main'
