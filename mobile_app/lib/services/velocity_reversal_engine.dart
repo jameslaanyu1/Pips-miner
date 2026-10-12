@@ -33,6 +33,7 @@ class VelocityReversalEngine {
   String? _ivHedgeParentId;
   double? _ivEntryPrice;
   bool _ivResistanceTested = false;
+  bool _ivBreakoutConfirmed = false;
   int _ivBias = 1;
   static const String _ivStateKey = 'pips_miner_iv_trade_state';
 
@@ -101,6 +102,7 @@ class VelocityReversalEngine {
     }
 
     if (plan != null) {
+      await _restoreIvState();
       final zoneSignal = _zoneEntry(plan, liveMid, signal);
       if (zoneSignal == null) return;
       _busy = true;
@@ -219,6 +221,7 @@ class VelocityReversalEngine {
       final state = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       _ivBias = (state['bias'] as num?)?.toInt() ?? _ivBias;
       _ivResistanceTested = state['resistanceTested'] == true;
+      _ivBreakoutConfirmed = state['breakoutConfirmed'] == true;
       _ivHedgePositionId = state['hedgePositionId']?.toString();
       _ivHedgeParentId = state['hedgeParentId']?.toString();
       _ivEntryPrice = _number(state['entryPrice']) ?? _ivEntryPrice;
@@ -229,6 +232,7 @@ class VelocityReversalEngine {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_ivStateKey, jsonEncode({
       'bias': _ivBias, 'resistanceTested': _ivResistanceTested,
+      'breakoutConfirmed': _ivBreakoutConfirmed,
       'hedgePositionId': _ivHedgePositionId, 'hedgeParentId': _ivHedgeParentId,
       'entryPrice': _ivEntryPrice,
     }));
@@ -350,17 +354,21 @@ class VelocityReversalEngine {
 
     if (price > topResistance * (1 + tolerance)) {
       _ivBias = 1;
+      _ivBreakoutConfirmed = true;
       _ivResistanceTested = true;
       _saveIvState();
-      if (near(topResistance) && current > 0 && signal.expanded) return {'buy': true};
-      return null; // breakout continuation only on a retest; never chase far above the zone.
+      return null; // Confirm the break, then wait for a retest rather than chase.
+    }
+    if (_ivBreakoutConfirmed && _ivBias > 0 && near(topResistance) && current > 0) {
+      return {'buy': true}; // Bullish continuation after a broken-resistance retest.
     }
     for (final zone in resistances) {
       final level = zone['price'] as double;
       if (!near(level)) continue;
       _ivResistanceTested = true;
-      if (previous > 0 && current < 0 && price <= level && signal.expanded) {
+      if (!_ivBreakoutConfirmed && previous > 0 && current < 0 && price <= level && signal.expanded) {
         _ivBias = -1;
+        _ivBreakoutConfirmed = false;
         _saveIvState();
         return {'buy': false};
       }
@@ -438,7 +446,13 @@ class VelocityReversalEngine {
         .where((o) => o['symbol'] == config.symbol).toList();
 
     await _restoreIvState();
-    final active = _findActivePosition(strategyPositions);
+    final hasIvPlan = await _loadOptionsPlan() != null;
+    final active = hasIvPlan
+        ? (strategyPositions.where((p) {
+            final id = p['clientId']?.toString() ?? '';
+            return id.contains('_IV_') && !id.contains('_IV_HEDGE_');
+          }).firstOrNull ?? _findActivePosition(strategyPositions))
+        : _findActivePosition(strategyPositions);
     if (active != null) {
       final detectedDirection = _positionDirection(active);
       if (detectedDirection != null) {
