@@ -312,7 +312,7 @@ class VelocityReversalEngine {
       final spec = await api.symbolSpecification(config.symbol);
       final minVolume = _number(spec['minVolume'] ?? spec['volumeMin']) ?? config.minimumVolume;
       final step = _number(spec['volumeStep'] ?? spec['lotStep']) ?? config.volumeStep;
-      final hedgeVolume = _floorToStep(net.abs().clamp(0.0, riskLimited), step);
+      final hedgeVolume = _floorToStep(net.abs().clamp(0.0, riskLimited).toDouble(), step);
       if (hedgeVolume < minVolume) return;
       await api.marketOrder(symbol: config.symbol, volume: hedgeVolume, buy: hedgeBuy,
         clientId: '${_clientPrefix}_IV_HEDGE_${DateTime.now().microsecondsSinceEpoch}', magic: magic);
