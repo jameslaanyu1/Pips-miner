@@ -224,6 +224,9 @@ jobs:
       - name: Generate app icons
         run: dart run flutter_launcher_icons
 
+      - name: Run Flutter tests
+        run: flutter test
+
       - name: Analyze Flutter project
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
