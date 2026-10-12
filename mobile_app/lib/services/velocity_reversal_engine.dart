@@ -372,6 +372,7 @@ class VelocityReversalEngine {
         await _saveIvState();
         return {'buy': false};
       }
+      await _saveIvState();
       return null;
     }
     if (_ivBias >= 0) {
@@ -520,7 +521,7 @@ class VelocityReversalEngine {
     throw Exception('Market order succeeded but the new position was not visible after terminal-state checks.');
   }
 
-  Future<double> _calculatePositionVolume({required bool buy}) async {
+  Future<double> _calculatePositionVolume({required bool buy, double? riskDistancePips}) async {
     final account = await api.accountInformation();
     final specification = await api.symbolSpecification(config.symbol);
     final price = await api.symbolPrice(config.symbol);
