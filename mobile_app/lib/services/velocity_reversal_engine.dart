@@ -259,14 +259,34 @@ class VelocityReversalEngine {
     await _restoreIvState();
     final all = (await api.positions()).whereType<Map>()
         .map((p) => Map<String, dynamic>.from(p))
-        .where(_isStrategyPosition).where((p) => p['symbol']?.toString() == config.symbol).toList();
+        .where(_isStrategyPosition)
+        .where((p) => p['symbol']?.toString() == config.symbol)
+        .where((p) => (p['clientId']?.toString() ?? '').contains('_IV_') ||
+            p['id']?.toString() == _activePositionId ||
+            p['id']?.toString() == _ivHedgePositionId).toList();
     final active = all.where((p) => p['id']?.toString() == _activePositionId).firstOrNull;
-    if (active == null) {
-      await _clearIvTradeState();
-      return;
-    }
     final hedge = all.where((p) => p['id']?.toString() == _ivHedgePositionId ||
         (p['clientId']?.toString() ?? '').contains('_IV_HEDGE_')).firstOrNull;
+    if (active == null) {
+      if (hedge == null) {
+        await _clearIvTradeState();
+        return;
+      }
+      // If the original leg was manually closed, retain the orphan hedge and
+      // only close it when its own net reported P&L reaches breakeven.
+      final hedgeProfit = _positionProfit(hedge);
+      if (hedgeProfit >= 0) {
+        final hedgeId = hedge['id']?.toString();
+        if (hedgeId != null) {
+          await api.closePosition(hedgeId);
+          final stillOpen = (await api.positions()).whereType<Map>()
+              .map((p) => Map<String, dynamic>.from(p))
+              .any((p) => p['id']?.toString() == hedgeId);
+          if (!stillOpen) await _clearIvTradeState();
+        }
+      }
+      return;
+    }
     if (hedge != null) {
       _ivHedgePositionId = hedge['id']?.toString();
       _ivHedgeParentId = active['id']?.toString();
