@@ -108,10 +108,10 @@ class IvOptionsParser {
   }
 
   OptionsZonePlan parseText(String source) {
-    final text = source.replaceAll(',', '').replaceAll(RegExp(r'[\\t ]+'), ' ');
+    final text = source.replaceAll(',', '').replaceAll(RegExp(r'[\t ]+'), ' ');
     final values = <double>{};
     // Collect candidate gold strikes; the center/middle strike is deliberately not a zone.
-    for (final match in RegExp(r'(?<![\\d.])(\\d{4,5}(?:\\.\\d+)?)(?![\\d.])').allMatches(text)) {
+    for (final match in RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text)) {
       final value = double.tryParse(match.group(1)!);
       if (value != null && value >= 1000 && value <= 10000) values.add(value);
     }
@@ -120,7 +120,7 @@ class IvOptionsParser {
     }
 
     final sorted = values.toList()..sort();
-    final spotMatch = RegExp(r'(?:XAU\\s*/?\\s*USD|GOLD|SPOT)\\D{0,30}(\\d{4}(?:\\.\\d+)?)', caseSensitive: false).firstMatch(text);
+    final spotMatch = RegExp(r'(?:XAU\s*/?\s*USD|GOLD|SPOT)\D{0,30}(\d{4}(?:\.\d+)?)', caseSensitive: false).firstMatch(text);
     final spot = spotMatch == null ? null : double.tryParse(spotMatch.group(1)!);
     final anchor = spot ?? sorted[sorted.length ~/ 2];
     final nearest = sorted.toList()..sort((a, b) {
@@ -145,7 +145,7 @@ class IvOptionsParser {
       OptionsZone(label: 'S2', price: lower[1], isResistance: false),
       OptionsZone(label: 'S3', price: lower[0], isResistance: false),
     ];
-    final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\\s*[: ]?\\s*)(\\d{4}[-/]\\d{2}[-/]\\d{2})', caseSensitive: false).firstMatch(text);
+    final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\s*[: ]?\s*)(\d{4}[-/]\d{2}[-/]\d{2})', caseSensitive: false).firstMatch(text);
     return OptionsZonePlan(zones: zones, referencePrice: reference, expiry: expiryMatch?.group(1), sourceText: text);
   }
 
