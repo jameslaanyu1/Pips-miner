@@ -120,6 +120,7 @@ jobs:
               '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
               '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
               '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+              '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
           ]
           for permission in perms:
               name = permission.split('name="', 1)[1].split('"', 1)[0]
