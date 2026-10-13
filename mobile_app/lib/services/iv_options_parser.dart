@@ -77,16 +77,25 @@ class IvOptionsParser {
         throw const FormatException('This PDF has no selectable text. Export its page as an image or upload a screenshot for OCR.');
       }
     } else {
-      final path = file.path;
-      if (path == null) {
-        throw const FormatException('Could not access this image for OCR. Please choose the image again.');
+      // FilePicker can provide image bytes without a reusable filesystem path.
+      // Materialize those bytes temporarily for ML Kit, then remove the temp file.
+      final existingPath = file.path;
+      final tempFile = existingPath == null
+          ? File('${(await getTemporaryDirectory()).path}/iv_options_ocr_${DateTime.now().microsecondsSinceEpoch}_${name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}')
+          : null;
+      if (tempFile != null) {
+        await tempFile.writeAsBytes(bytes, flush: true);
       }
+      final imagePath = existingPath ?? tempFile!.path;
       final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       try {
         final recognized = await recognizer.processImage(InputImage.fromFilePath(imagePath));
         text = recognized.text;
       } finally {
         await recognizer.close();
+        if (tempFile != null && await tempFile.exists()) {
+          await tempFile.delete();
+        }
       }
     }
 
