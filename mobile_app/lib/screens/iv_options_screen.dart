@@ -71,8 +71,32 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
           const SizedBox(height: 10),
           Text('Reference price: ${_plan!.referencePrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
           if (_plan!.expiry != null) Text('Detected expiry: ${_plan!.expiry}'),
-          const SizedBox(height: 8),
-          const Text('Six zones (the middle strike is excluded):', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 12),
+          // The middle strike is shown separately in amber and is not a support/resistance zone.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.14),
+              border: Border.all(color: Colors.amber, width: 1.5),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(children: [
+              const Icon(Icons.adjust, color: Colors.amber, size: 26),
+              const SizedBox(width: 10),
+              const Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('PIVOT — MIDDLE STRIKE', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 3),
+                  Text('Reference level only; excluded from the six zones.', style: TextStyle(fontSize: 12)),
+                ],
+              )),
+              Text(_plan!.middleStrike.toStringAsFixed(2), style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 16)),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          const Text('Six support/resistance zones:', style: TextStyle(fontSize: 12)),
           const SizedBox(height: 8),
           ..._plan!.zones.map((z) => ListTile(
             dense: true,
@@ -81,7 +105,7 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
             trailing: Text(z.price.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold)),
           )),
           const SizedBox(height: 8),
-          const Text('The saved six-zone plan is available to the bot until a new valid file replaces it.', style: TextStyle(fontSize: 12, color: Colors.greenAccent)),
+          const Text('The saved pivot and six-zone plan are available to the bot until a new valid file replaces them.', style: TextStyle(fontSize: 12, color: Colors.greenAccent)),
         ]))),
       ],
     ]),
