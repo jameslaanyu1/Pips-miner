@@ -387,9 +387,24 @@ class VelocityReversalEngine {
   Future<Map<String, dynamic>?> _zoneEntry(Map<String, dynamic> plan, double price, VelocityExpansionResult signal) async {
     final rawZones = plan['zones'];
     if (rawZones is! List || _liveCandles.length < 3) return null;
+
+    // The fourth of the seven selected strikes is the pivot. It is metadata /
+    // display-only: never treat it as support or resistance, and never open a
+    // trade because price is testing the pivot.
+    final pivot = _number(plan['middleStrike'] ?? plan['pivotStrike']);
+    final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
+    bool near(double level) => (price - level).abs() / level <= tolerance;
+    if (pivot != null && pivot > 0 && near(pivot)) return null;
+
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
       .map((z) => {'label': z['label']?.toString() ?? '', 'price': _number(z['price']), 'isResistance': z['isResistance'] == true})
-      .where((z) => z['price'] != null && (z['price'] as double) > 0).toList();
+      .where((z) {
+        final level = z['price'];
+        if (level == null || (level as double) <= 0) return false;
+        // Defensive guard for old/malformed plans that accidentally include
+        // the pivot in the zone list.
+        return pivot == null || (level - pivot).abs() > 0.0000001;
+      }).toList();
     final supports = zones.where((z) => z['isResistance'] == false).toList()
       ..sort((a,b) => (b['price'] as double).compareTo(a['price'] as double));
     final resistances = zones.where((z) => z['isResistance'] == true).toList()
@@ -397,8 +412,6 @@ class VelocityReversalEngine {
     if (supports.length != 3 || resistances.length != 3) return null;
     final previous = _liveCandles[_liveCandles.length - 2].close - _liveCandles[_liveCandles.length - 3].close;
     final current = signal.currentVelocity;
-    final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
-    bool near(double level) => (price - level).abs() / level <= tolerance;
     final topResistance = resistances.last['price'] as double;
     final bottomSupport = supports.last['price'] as double;
 
