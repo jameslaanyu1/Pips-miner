@@ -140,7 +140,181 @@ class _EngineChronometer extends StatefulWidget {
   @override State<_EngineChronometer> createState() => _EngineChronometerState();
 }
 
-class _EngineChronometerState extends State<_EngineChronometer> {
+class _EngineChronometerState extends State<_EngineChronometer> with SingleTickerProviderStateMixin {
+  DateTime? _startedAt;
+  Duration _elapsed = Duration.zero;
+  late final AnimationController _gear = AnimationController(vsync: this, duration: const Duration(seconds: 6));
+  double _stoppedRotation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.running) {
+      _startedAt = DateTime.now();
+      _gear.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _EngineChronometer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.running && !oldWidget.running) {
+      _startedAt = DateTime.now();
+      _elapsed = Duration.zero;
+      _gear.repeat();
+    }
+    if (!widget.running && oldWidget.running) {
+      if (_startedAt != null) _elapsed = DateTime.now().difference(_startedAt!);
+      _stoppedRotation = _gear.value;
+      _gear.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _gear.dispose();
+    super.dispose();
+  }
+
+  String _format(Duration d) => '${d.inHours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.running ? const Color(0xFF39FF75) : Colors.white38;
+    return Column(children: [
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Icon(Icons.settings_rounded, color: color, size: 15),
+        const SizedBox(width: 7),
+        Text('ACTIVE ENGINE', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2)),
+        const SizedBox(width: 8),
+        Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: [BoxShadow(color: color.withOpacity(.7), blurRadius: 8)])),
+      ]),
+      const SizedBox(height: 8),
+      SizedBox(
+        height: 154,
+        width: 270,
+        child: AnimatedBuilder(
+          animation: _gear,
+          builder: (context, _) => CustomPaint(
+            painter: _GearEnginePainter(
+              rotation: (widget.running ? _gear.value : _stoppedRotation) * math.pi * 2,
+              running: widget.running,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 5),
+      StreamBuilder<int>(
+        stream: Stream<int>.periodic(const Duration(seconds: 1), (n) => n),
+        initialData: 0,
+        builder: (context, snapshot) {
+          final elapsed = widget.running && _startedAt != null ? DateTime.now().difference(_startedAt!) : _elapsed;
+          return Text(_format(elapsed), style: TextStyle(color: color, fontSize: 35, fontWeight: FontWeight.w300, letterSpacing: 4, fontFamily: 'monospace', shadows: widget.running ? [Shadow(color: color.withOpacity(.38), blurRadius: 20)] : null));
+        },
+      ),
+      const SizedBox(height: 6),
+      Text(widget.running ? 'ENGINE RUNNING • GEARS ENGAGED' : 'ENGINE STOPPED • GEARS LOCKED', style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+      const SizedBox(height: 15),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        _readout('CYCLE', '${widget.cycle}'),
+        Container(width: 1, height: 27, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 22)),
+        _readout('ACTIVE', '${widget.activeTrades.length}'),
+        Container(width: 1, height: 27, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 22)),
+        _readout('TRAILING', '${widget.trailingTrades.length}'),
+      ]),
+      if (widget.activeTrades.isNotEmpty || widget.trailingTrades.isNotEmpty) ...[
+        const SizedBox(height: 13),
+        Wrap(alignment: WrapAlignment.center, spacing: 12, runSpacing: 7, children: [
+          ...widget.activeTrades.map((t) => Text('● ${t.direction} ${t.entryPrice?.toStringAsFixed(2) ?? ''}', style: TextStyle(color: t.direction == 'BUY' ? const Color(0xFF39FF75) : const Color(0xFFFF334F), fontSize: 9, fontWeight: FontWeight.w800))),
+          ...widget.trailingTrades.map((t) => Text('○ ${t.direction} ${t.price?.toStringAsFixed(2) ?? ''}', style: TextStyle(color: t.direction == 'BUY' ? const Color(0xFF39FF75) : const Color(0xFFFF334F), fontSize: 9, fontWeight: FontWeight.w700))),
+        ]),
+      ],
+    ]);
+  }
+
+  Widget _readout(String label, String value) => Column(children: [
+    Text(value, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900)),
+    const SizedBox(height: 4),
+    Text(label, style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+  ]);
+}
+
+class _GearEnginePainter extends CustomPainter {
+  const _GearEnginePainter({required this.rotation, required this.running});
+  final double rotation;
+  final bool running;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final green = const Color(0xFF39FF75);
+    final steel = const Color(0xFF8DA7B3);
+    final center = Offset(size.width / 2, size.height / 2);
+    final glowPaint = Paint()..color = green.withOpacity(running ? .09 : .025)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18);
+    canvas.drawCircle(center, 61, glowPaint);
+
+    // A ring of fine calibration marks makes the gear train read like a chronometer.
+    final ticks = Paint()..color = green.withOpacity(running ? .38 : .10)..strokeWidth = 1;
+    for (var i = 0; i < 48; i++) {
+      final a = i * math.pi * 2 / 48;
+      final r1 = i % 4 == 0 ? 67.0 : 71.0;
+      final r2 = 77.0;
+      canvas.drawLine(
+        Offset(center.dx + math.cos(a) * r1, center.dy + math.sin(a) * r1),
+        Offset(center.dx + math.cos(a) * r2, center.dy + math.sin(a) * r2),
+        ticks,
+      );
+    }
+
+    _drawGear(canvas, Offset(center.dx - 39, center.dy - 15), 29, rotation, steel, green, 12);
+    _drawGear(canvas, Offset(center.dx + 34, center.dy - 34), 23, -rotation * 29 / 23, steel, green, 10);
+    _drawGear(canvas, Offset(center.dx + 37, center.dy + 31), 20, rotation * 29 / 20, steel, green, 10);
+    _drawGear(canvas, Offset(center.dx - 4, center.dy + 30), 27, -rotation * 29 / 27, steel, green, 12);
+
+    final hub = Paint()..color = green.withOpacity(running ? .95 : .35)..style = PaintingStyle.stroke..strokeWidth = 2;
+    canvas.drawCircle(center, 12, hub);
+    canvas.drawCircle(center, 5, Paint()..color = green.withOpacity(running ? .8 : .25));
+    final hubRing = Paint()..color = green.withOpacity(running ? .4 : .12)..style = PaintingStyle.stroke..strokeWidth = 1;
+    canvas.drawCircle(center, 19, hubRing);
+  }
+
+  void _drawGear(Canvas canvas, Offset center, double radius, double angle, Color steel, Color glow, int teeth) {
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(angle);
+    final path = Path();
+    final points = teeth * 4;
+    for (var i = 0; i < points; i++) {
+      final a = i * math.pi * 2 / points;
+      final phase = i % 4;
+      final r = radius * (phase == 0 || phase == 3 ? .83 : 1.0);
+      final p = Offset(math.cos(a) * r, math.sin(a) * r);
+      if (i == 0) { path.moveTo(p.dx, p.dy); } else { path.lineTo(p.dx, p.dy); }
+    }
+    path.close();
+
+    canvas.drawPath(path, Paint()
+      ..color = glow.withOpacity(running ? .18 : .035)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
+    canvas.drawPath(path, Paint()..color = const Color(0xFF17252B));
+    canvas.drawPath(path, Paint()..color = steel.withOpacity(running ? .92 : .35)..style = PaintingStyle.stroke..strokeWidth = 2);
+    canvas.drawCircle(Offset.zero, radius * .67, Paint()..color = steel.withOpacity(running ? .55 : .2)..style = PaintingStyle.stroke..strokeWidth = 2);
+    canvas.drawCircle(Offset.zero, radius * .48, Paint()..color = glow.withOpacity(running ? .24 : .06)..style = PaintingStyle.stroke..strokeWidth = 1.5);
+    canvas.drawCircle(Offset.zero, radius * .20, Paint()..color = steel.withOpacity(running ? .65 : .2)..style = PaintingStyle.stroke..strokeWidth = 2);
+    for (var i = 0; i < 3; i++) {
+      final a = i * math.pi * 2 / 3;
+      canvas.drawCircle(Offset(math.cos(a) * radius * .34, math.sin(a) * radius * .34), 2.2, Paint()..color = glow.withOpacity(running ? .8 : .18));
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _GearEnginePainter oldDelegate) =>
+      oldDelegate.rotation != rotation || oldDelegate.running != running;
+}
+
+
   DateTime? _startedAt;
   Duration _elapsed = Duration.zero;
   @override void initState() { super.initState(); if (widget.running) _startedAt = DateTime.now(); }
