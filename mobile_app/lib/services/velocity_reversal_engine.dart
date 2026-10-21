@@ -388,24 +388,23 @@ class VelocityReversalEngine {
     final rawZones = plan['zones'];
     if (rawZones is! List || _liveCandles.length < 3) return null;
 
-    // The 4th strike is a reference-only pivot. Explicitly reject it even if
-    // a malformed/older saved plan accidentally includes it in the zones list.
-    if (plan['pivotIsTradingLevel'] == true) return null;
+    // The 4th strike is a tradable pivot. It is kept separate from the three
+    // support and three resistance levels so it cannot distort zone counts.
     final pivotPrice = _number(plan['pivotPrice']);
     final pivotIndex = (plan['pivotStrikeIndex'] as num?)?.toInt();
     if (pivotIndex != null && pivotIndex != 3) return null;
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
-      .map((z) => {'label': z['label']?.toString() ?? '', 'price': _number(z['price']), 'isResistance': z['isResistance'] == true})
-      .where((z) {
-        final label = (z['label'] as String).toUpperCase();
-        final level = z['price'] as double?;
-        final isPivotLabel = label == 'PIVOT' || label == 'P' || label.contains('PIVOT');
-        final isPivotPrice = pivotPrice != null && level != null && (level - pivotPrice).abs() < 0.0000001;
-        return !isPivotLabel && !isPivotPrice && level != null && level > 0;
-      }).toList();
-    final supports = zones.where((z) => z['isResistance'] == false).toList()
+      .map((z) {
+        final label = z['label']?.toString() ?? '';
+        return {'label': label, 'price': _number(z['price']), 'isResistance': z['isResistance'] == true,
+          'isPivot': z['isPivot'] == true || label.toUpperCase().contains('PIVOT') || label.toUpperCase() == 'P'};
+      })
+      .where((z) => (z['price'] as double?) != null && (z['price'] as double) > 0)
+      .toList();
+    final pivotZone = zones.where((z) => z['isPivot'] == true).firstOrNull;
+    final supports = zones.where((z) => z['isPivot'] != true && z['isResistance'] == false).toList()
       ..sort((a,b) => (b['price'] as double).compareTo(a['price'] as double));
-    final resistances = zones.where((z) => z['isResistance'] == true).toList()
+    final resistances = zones.where((z) => z['isPivot'] != true && z['isResistance'] == true).toList()
       ..sort((a,b) => (a['price'] as double).compareTo(b['price'] as double));
     if (supports.length != 3 || resistances.length != 3) return null;
     final previous = _liveCandles[_liveCandles.length - 2].close - _liveCandles[_liveCandles.length - 3].close;
@@ -458,6 +457,34 @@ class VelocityReversalEngine {
       }
       await _saveIvState();
       return null;
+    }
+
+    // The pivot is a live trading level: above it, fading downward velocity
+    // can trigger a buy; below it, fading upward velocity can trigger a sell.
+    // A confirmed momentum cross through the pivot is also tradable.
+    final pivotLevel = _number(pivotZone?['price']) ?? pivotPrice;
+    if (pivotLevel != null && near(pivotLevel)) {
+      final abovePivot = price >= pivotLevel;
+      if (abovePivot && previous < 0 && current < 0 && current > previous) {
+        _ivBias = 1;
+        await _saveIvState();
+        return {'buy': true};
+      }
+      if (!abovePivot && previous > 0 && current > 0 && current < previous) {
+        _ivBias = -1;
+        await _saveIvState();
+        return {'buy': false};
+      }
+      if (previous <= 0 && current > 0 && price >= pivotLevel) {
+        _ivBias = 1;
+        await _saveIvState();
+        return {'buy': true};
+      }
+      if (previous >= 0 && current < 0 && price <= pivotLevel) {
+        _ivBias = -1;
+        await _saveIvState();
+        return {'buy': false};
+      }
     }
 
     // Treat even a brief counter-trend velocity pulse as a retracement.
