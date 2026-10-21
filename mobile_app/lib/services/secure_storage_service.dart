@@ -14,6 +14,8 @@ class SecureStorageService {
   static const String _mt5LoginKey = 'mt5_login';
   static const String _mt5ServerKey = 'mt5_server';
   static const String _mt5PasswordKey = 'mt5_password';
+  static const String _metaApiTokenKey = 'metaapi_token';
+  static const String _metaApiAccountIdKey = 'metaapi_account_id';
 
   Future<void> savePipsMinerSession({
     required String sessionToken,
@@ -36,7 +38,19 @@ class SecureStorageService {
   Future<void> clearPipsMinerSession() async {
     await _storage.delete(key: _pipsMinerSessionTokenKey);
     await _storage.delete(key: _pipsMinerAccountIdKey);
+    await _storage.delete(key: _metaApiTokenKey);
+    await _storage.delete(key: _metaApiAccountIdKey);
   }
+
+  Future<void> saveMetaApiCredentials({required String token, required String accountId}) async {
+    await _storage.write(key: _metaApiTokenKey, value: token.trim());
+    await _storage.write(key: _metaApiAccountIdKey, value: accountId.trim());
+    // Keep the service's existing session accessors compatible with background execution.
+    await savePipsMinerSession(sessionToken: token, accountId: accountId);
+  }
+
+  Future<String?> getMetaApiToken() async => _storage.read(key: _metaApiTokenKey);
+  Future<String?> getMetaApiAccountId() async => _storage.read(key: _metaApiAccountIdKey);
 
   Future<void> saveTradingSymbol(String symbol) async {
     final normalized = symbol.trim().toUpperCase();
