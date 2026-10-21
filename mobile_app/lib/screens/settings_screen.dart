@@ -122,7 +122,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 30),
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
-                    Card(
+                    Container(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         child: const Column(
@@ -207,7 +207,7 @@ class _ModeSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final live = bot.isLiveAccount;
-    return Card(
+    return Container(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -274,7 +274,7 @@ class _InfoSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -308,7 +308,7 @@ class _EngineSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
