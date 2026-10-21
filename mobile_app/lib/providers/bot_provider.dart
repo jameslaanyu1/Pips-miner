@@ -178,7 +178,7 @@ class BotProvider extends ChangeNotifier {
     final message = error.toString();
     final lower = message.toLowerCase();
     if (lower.contains('401') || lower.contains('403')) return 'MetaApi denied access. Check the account ID and ensure the restricted token has provisioning read, REST trading, and streaming permissions.';
-    if (lower.contains('404')) return 'MetaApi could not find this account. Confirm this is the MetaApi account ID, not the broker's MT5 login number.';
+    if (lower.contains('404')) return "MetaApi could not find this account. Confirm this is the MetaApi account ID, not the broker\'s MT5 login number.";
     if (lower.contains('429')) return 'Too many requests. Please wait and reconnect.';
     if (lower.contains('socketexception') || lower.contains('failed host lookup')) return 'Network connection failed. Check the phone internet connection.';
     if (lower.contains('timeout')) return 'Connection timed out. Check the internet connection and try again.';
