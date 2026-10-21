@@ -45,8 +45,10 @@ class SecureStorageService {
   Future<void> saveMetaApiCredentials({required String token, required String accountId}) async {
     await _storage.write(key: _metaApiTokenKey, value: token.trim());
     await _storage.write(key: _metaApiAccountIdKey, value: accountId.trim());
-    // Keep the service's existing session accessors compatible with background execution.
+    // Keep the background service's shared session accessors compatible.
     await savePipsMinerSession(sessionToken: token, accountId: accountId);
+    // Remove credentials from the old MT5-password connection form.
+    await clearMt5Connection();
   }
 
   Future<String?> getMetaApiToken() async => _storage.read(key: _metaApiTokenKey);
