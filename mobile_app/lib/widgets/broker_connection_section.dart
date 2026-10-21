@@ -34,7 +34,7 @@ class BrokerConnectionSection extends StatelessWidget {
             Text('METAAPI BRIDGE', style: TextStyle(fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Colors.white54)),
           ]),
           const SizedBox(height: 8),
-          const Text('Connect directly to MetaApi. No MT5 password or Vercel bridge is needed. Use an account-scoped MetaApi token.', style: TextStyle(color: Colors.white38, fontSize: 10.5)),
+          const Text('Connect directly to MetaApi. No MT5 password or Vercel bridge is needed. Use a restricted token with account/provisioning read, REST trading, and streaming permissions; avoid a full admin token.', style: TextStyle(color: Colors.white38, fontSize: 10.5)),
           const SizedBox(height: 16),
           TextField(
             controller: loginController,
