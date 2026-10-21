@@ -111,6 +111,14 @@ class BotProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<List<String>> availableSymbols() async {
+    final api = _api;
+    if (api == null) {
+      throw Exception('Connect MetaApi before loading account symbols.');
+    }
+    return api.symbols();
+  }
+
   Future<void> connect() async {
     _connectionError = null;
     notifyListeners();
