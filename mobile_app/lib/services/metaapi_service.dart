@@ -65,7 +65,7 @@ class MetaApiService {
   Future<Map<String, dynamic>> closePosition(String positionId) async => _trade({'actionType': 'POSITION_CLOSE_ID', 'positionId': positionId});
   Future<Map<String, dynamic>> calculateMargin({required String symbol, required double volume, required bool buy, required double openPrice}) async {
     await _ensureRegion();
-    return _map(await http.post(_uri('/users/current/accounts/$accountId/margin'), headers: _headers, body: jsonEncode({'symbol': symbol, 'type': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL', 'volume': volume, 'openPrice': openPrice})).timeout(const Duration(seconds: 15)));
+    return _map(await http.post(_uri('/users/current/accounts/$accountId/calculate-margin'), headers: _headers, body: jsonEncode({'symbol': symbol, 'type': buy ? 'ORDER_TYPE_BUY' : 'ORDER_TYPE_SELL', 'volume': volume, 'openPrice': openPrice})).timeout(const Duration(seconds: 15)));
   }
   Future<Map<String, dynamic>> _trade(Map<String, dynamic> body) async {
     await _ensureRegion();
