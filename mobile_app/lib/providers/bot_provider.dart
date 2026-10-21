@@ -163,6 +163,17 @@ class BotProvider extends ChangeNotifier {
     }
   }
 
+  Future<List<String>> availableSymbols() async {
+    final api = _api;
+    if (api == null) throw Exception('Connect the MetaApi account first.');
+    final raw = await api.symbols();
+    final symbols = raw.map((item) {
+      if (item is Map) return (item['symbol'] ?? item['name'] ?? '').toString().trim().toUpperCase();
+      return item.toString().trim().toUpperCase();
+    }).where((value) => value.isNotEmpty).toSet().toList()..sort();
+    return symbols;
+  }
+
   String _friendlyConnectionError(Object error) {
     final message = error.toString();
     final lower = message.toLowerCase();
