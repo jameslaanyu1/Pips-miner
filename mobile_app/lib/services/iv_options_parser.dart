@@ -139,7 +139,8 @@ class IvOptionsParser {
   }
 
   bool _hasLikelyPrice(String text) {
-    final matches = RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text);
+    final normalized = _normalizeOcrText(text);
+    final matches = RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(normalized);
     return matches.map((m) => double.tryParse(m.group(1)!))
         .whereType<double>().where((v) => v >= 1000 && v <= 10000).toSet().length >= 7;
   }
