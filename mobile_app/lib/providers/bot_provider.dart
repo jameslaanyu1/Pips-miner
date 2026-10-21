@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
 import '../models/trading_config.dart';
 import '../services/background_execution_service.dart';
@@ -121,7 +119,7 @@ class BotProvider extends ChangeNotifier {
       final accountId = await _storage.getPipsMinerAccountId();
       if (sessionToken == null || sessionToken.trim().isEmpty || accountId == null || accountId.trim().isEmpty) {
         _isConnected = false;
-        _connectionError = 'MT5 account is not connected. Connect the account first.';
+        _connectionError = 'MetaApi account is not connected. Enter the MetaApi token and account ID first.';
         notifyListeners();
         return;
       }
@@ -140,29 +138,17 @@ class BotProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> connectMt5({required String login, required String password, required String server}) async {
+  Future<bool> connectMetaApi({required String token, required String accountId}) async {
     _connectionError = null;
     notifyListeners();
     try {
-      final requestedLogin = login.trim();
-      final requestedPassword = password;
-      final requestedServer = server.trim();
-      if (requestedLogin.isEmpty || requestedPassword.isEmpty || requestedServer.isEmpty) throw Exception('MT5 login, password and broker server are required.');
-      final response = await http.post(Uri.parse('https://pips-miner-backend.vercel.app/api/v1/connect'), headers: const {'Accept': 'application/json', 'Content-Type': 'application/json'}, body: jsonEncode({'login': requestedLogin, 'password': requestedPassword, 'server': requestedServer, 'platform': 'mt5'}));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        String message = response.body;
-        try { final decoded = jsonDecode(response.body); if (decoded is Map<String, dynamic> && decoded['error'] != null) message = decoded['error'].toString(); } catch (_) {}
-        throw Exception(message);
-      }
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic>) throw Exception('Invalid Pips-Miner connection response.');
-      final sessionToken = decoded['sessionToken']?.toString().trim() ?? '';
-      final accountId = decoded['accountId']?.toString().trim() ?? '';
-      if (sessionToken.isEmpty || accountId.isEmpty) throw Exception('Pips-Miner did not return a valid trading session.');
-      await _storage.savePipsMinerSession(sessionToken: sessionToken, accountId: accountId);
-      await _storage.saveMt5Connection(login: requestedLogin, server: requestedServer);
-      _api = MetaApiService(token: sessionToken, accountId: accountId);
-      final info = await _api!.accountInformation();
+      final apiToken = token.trim();
+      final metaAccountId = accountId.trim();
+      if (apiToken.isEmpty || metaAccountId.isEmpty) throw Exception('MetaApi token and MetaApi account ID are required.');
+      final candidate = MetaApiService(token: apiToken, accountId: metaAccountId);
+      final info = await candidate.accountInformation();
+      await _storage.saveMetaApiCredentials(token: apiToken, accountId: metaAccountId);
+      _api = candidate;
       _isConnected = true;
       _connectionError = null;
       _balance = _number(info['balance']) ?? _balance;
@@ -180,8 +166,8 @@ class BotProvider extends ChangeNotifier {
   String _friendlyConnectionError(Object error) {
     final message = error.toString();
     final lower = message.toLowerCase();
-    if (lower.contains('401') || lower.contains('403')) return 'Pips-Miner authentication failed. Connect the MT5 account again.';
-    if (lower.contains('404')) return 'The Pips-Miner backend could not find this account.';
+    if (lower.contains('401') || lower.contains('403')) return 'MetaApi authentication failed. Check the MetaApi token and account ID.';
+    if (lower.contains('404')) return 'MetaApi could not find this account. Confirm this is the MetaApi account ID, not the broker's MT5 login number.';
     if (lower.contains('429')) return 'Too many requests. Please wait and reconnect.';
     if (lower.contains('socketexception') || lower.contains('failed host lookup')) return 'Network connection failed. Check the phone internet connection.';
     if (lower.contains('timeout')) return 'Connection timed out. Check the internet connection and try again.';
@@ -198,7 +184,7 @@ class BotProvider extends ChangeNotifier {
     final accountId = await _storage.getPipsMinerAccountId();
 
     if (sessionToken == null || sessionToken.trim().isEmpty || accountId == null || accountId.trim().isEmpty) {
-      throw Exception('MT5 account is not connected. Connect the account first.');
+      throw Exception('MetaApi account is not connected. Enter the MetaApi token and account ID first.');
     }
 
     _api = MetaApiService(token: sessionToken.trim(), accountId: accountId.trim());
