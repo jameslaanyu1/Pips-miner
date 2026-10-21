@@ -40,7 +40,7 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
     final token = await storage.getPipsMinerSessionToken();
     final accountId = await storage.getPipsMinerAccountId();
     final storedSymbol = await storage.getTradingSymbol();
-    if (token == null || token.trim().isEmpty || accountId == null || accountId.trim().isEmpty) throw Exception('No existing Pips-Miner trading session is available. Connect the MT5 account first.');
+    if (token == null || token.trim().isEmpty || accountId == null || accountId.trim().isEmpty) throw Exception('No existing Pips-Miner trading session is available. Enter the MetaApi token and account ID first.');
     api = MetaApiService(token: token.trim(), accountId: accountId.trim());
     final symbol = storedSymbol?.trim().isNotEmpty == true ? storedSymbol!.trim().toUpperCase() : 'XAUUSD';
     config = TradingConfig(symbol: symbol, trailingPips: 100.0, reversalPips: 100.0, velocityBaselinePeriod: 5, velocityExpansionThreshold: 1.0);
