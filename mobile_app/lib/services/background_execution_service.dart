@@ -37,19 +37,20 @@ Future<void> pipsMinerBackgroundEntrypoint(ServiceInstance service) async {
 
   try {
     final storage = SecureStorageService();
-    final token = await storage.getPipsMinerSessionToken();
-    final accountId = await storage.getPipsMinerAccountId();
+    final token = await storage.getMetaApiToken();
+    final accountId = await storage.getMetaApiAccountId();
     final storedSymbol = await storage.getTradingSymbol();
-    if (token == null || token.trim().isEmpty || accountId == null || accountId.trim().isEmpty) throw Exception('No existing Pips-Miner trading session is available. Connect the MT5 account first.');
+    if (token == null || token.trim().isEmpty || accountId == null || accountId.trim().isEmpty) throw Exception('No MetaApi credentials are saved. Enter your MetaApi API token and account ID first.');
     api = MetaApiService(token: token.trim(), accountId: accountId.trim());
     final symbol = storedSymbol?.trim().isNotEmpty == true ? storedSymbol!.trim().toUpperCase() : 'XAUUSD';
     config = TradingConfig(symbol: symbol, trailingPips: 100.0, reversalPips: 100.0, velocityBaselinePeriod: 5, velocityExpansionThreshold: 1.0);
     engine = VelocityReversalEngine(api: api, config: config);
-    final streamConfig = await api.streamConfiguration();
-    final streamToken = streamConfig['token']?.toString().trim() ?? '';
-    final streamUrl = streamConfig['streamUrl']?.toString().trim() ?? '';
-    if (streamToken.isEmpty || streamUrl.isEmpty) throw Exception('MetaApi live streaming configuration is unavailable.');
-    stream = MetaApiStreamingService(token: streamToken, accountId: accountId.trim(), streamUrl: streamUrl);
+    final streamUrl = await api.streamUrl();
+    stream = MetaApiStreamingService(
+      token: token.trim(),
+      accountId: accountId.trim(),
+      streamUrl: streamUrl,
+    );
   } catch (e) {
     service.invoke('engineError', {'fatal': true, 'message': e.toString().replaceFirst('Exception: ', '')});
     service.stopSelf();
