@@ -10,16 +10,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 class OptionsZone {
-  const OptionsZone({required this.label, required this.price, required this.isResistance});
+  const OptionsZone({required this.label, required this.price, required this.isResistance, this.isPivot = false});
   final String label;
   final double price;
   final bool isResistance;
+  final bool isPivot;
 
-  Map<String, dynamic> toJson() => {'label': label, 'price': price, 'isResistance': isResistance};
+  Map<String, dynamic> toJson() => {'label': label, 'price': price, 'isResistance': isResistance, 'isPivot': isPivot};
   factory OptionsZone.fromJson(Map<String, dynamic> json) => OptionsZone(
     label: json['label'] as String,
     price: (json['price'] as num).toDouble(),
     isResistance: json['isResistance'] as bool,
+    isPivot: json['isPivot'] == true,
   );
 }
 
@@ -33,13 +35,22 @@ class OptionsZonePlan {
   final String? expiry;
   final String sourceText;
 
+  factory OptionsZonePlan.fromJson(Map<String, dynamic> json) => OptionsZonePlan(
+    zones: (json['zones'] as List).whereType<Map>().map((z) => OptionsZone.fromJson(Map<String, dynamic>.from(z))).toList(),
+    sevenStrikes: (json['strikes'] as List).map((v) => (v as num).toDouble()).toList(),
+    referencePrice: (json['referencePrice'] as num).toDouble(),
+    pivotPrice: (json['pivotPrice'] as num?)?.toDouble(),
+    expiry: json['expiry']?.toString(),
+    sourceText: json['sourceText']?.toString() ?? '',
+  );
+
   Map<String, dynamic> toJson() => {
     'zones': zones.map((z) => z.toJson()).toList(),
     'strikes': sevenStrikes,
     'pivotStrikeIndex': 3,
     'referencePrice': referencePrice,
     'pivotPrice': pivotPrice,
-    'pivotIsTradingLevel': false,
+    'pivotIsTradingLevel': true,
     'expiry': expiry,
     'sourceText': sourceText,
     'approvedAt': DateTime.now().toUtc().toIso8601String(),
@@ -48,6 +59,8 @@ class OptionsZonePlan {
 
 class IvOptionsParser {
   static const storageKey = 'pips_miner_iv_options_zone_plan';
+  static const sourceNameKey = 'pips_miner_iv_options_source_name';
+  static const sourcePathKey = 'pips_miner_iv_options_source_path';
 
   Future<OptionsZonePlan> parsePickedFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -66,7 +79,10 @@ class IvOptionsParser {
     if (text.trim().isEmpty) {
       throw const FormatException('No readable text was detected. Try a higher-resolution screenshot with the strike-price column fully visible.');
     }
-    return parseText(text);
+    final plan = parseText(text);
+    await _persistSourceFile(file.name, bytes);
+    await saveApprovedPlan(plan);
+    return plan;
   }
 
   Future<String> _readPdf(Uint8List bytes) async {
@@ -175,6 +191,7 @@ class IvOptionsParser {
       OptionsZone(label: 'R3', price: upper[2], isResistance: true),
       OptionsZone(label: 'R2', price: upper[1], isResistance: true),
       OptionsZone(label: 'R1', price: upper[0], isResistance: true),
+      OptionsZone(label: 'PIVOT', price: pivot, isResistance: false, isPivot: true),
       OptionsZone(label: 'S1', price: lower[2], isResistance: false),
       OptionsZone(label: 'S2', price: lower[1], isResistance: false),
       OptionsZone(label: 'S3', price: lower[0], isResistance: false),
@@ -190,6 +207,32 @@ class IvOptionsParser {
     );
   }
 
+  Future<void> _persistSourceFile(String name, Uint8List bytes) async {
+    final prefs = await SharedPreferences.getInstance();
+    final previousPath = prefs.getString(sourcePathKey);
+    final directory = await getApplicationDocumentsDirectory();
+    final extension = name.contains('.') ? name.split('.').last.toLowerCase() : 'bin';
+    final destination = File('${directory.path}/iv_options_reference.$extension');
+    if (previousPath != null && previousPath != destination.path) {
+      try { await File(previousPath).delete(); } catch (_) {}
+    }
+    await destination.writeAsBytes(bytes, flush: true);
+    await prefs.setString(sourceNameKey, name);
+    await prefs.setString(sourcePathKey, destination.path);
+  }
+
+  Future<String?> loadSavedSourceName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(sourceNameKey);
+  }
+
+  Future<String?> loadSavedSourcePath() async {
+    final prefs = await SharedPreferences.getInstance();
+    final path = prefs.getString(sourcePathKey);
+    if (path == null || !await File(path).exists()) return null;
+    return path;
+  }
+
   Future<void> saveApprovedPlan(OptionsZonePlan plan) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(storageKey, jsonEncode(plan.toJson()));
@@ -197,7 +240,11 @@ class IvOptionsParser {
 
   Future<void> clearPlan() async {
     final prefs = await SharedPreferences.getInstance();
+    final sourcePath = prefs.getString(sourcePathKey);
+    if (sourcePath != null) { try { await File(sourcePath).delete(); } catch (_) {} }
     await prefs.remove(storageKey);
+    await prefs.remove(sourceNameKey);
+    await prefs.remove(sourcePathKey);
   }
 
   Future<Map<String, dynamic>?> loadSavedPlan() async {
