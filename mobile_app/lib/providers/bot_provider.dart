@@ -182,12 +182,11 @@ class BotProvider extends ChangeNotifier {
     if (lower.contains('429')) return 'Too many requests. Please wait and reconnect.';
     if (lower.contains('socketexception') || lower.contains('failed host lookup')) return 'Network connection failed. Check the phone internet connection.';
     if (lower.contains('timeout')) return 'Connection timed out. Check the internet connection and try again.';
-    return 'Pips-Miner connection failed: $message';
+    return 'MetaApi connection failed: $message';
   }
 
-  /// Start does not reconnect MT5, call accountInformation(), or wait for
-  /// account readiness. The MT5/MetaApi session must already exist. The
-  /// background trading isolate will query market data and begin scanning.
+  /// Start requires an existing MetaApi session. The background trading
+  /// isolate queries market data and begins scanning after connection.
   Future<void> startBot() async {
     _engineError = null;
 
