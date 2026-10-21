@@ -14,7 +14,7 @@ class TradingMetrics extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Card(
+                  child: Container(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -42,7 +42,7 @@ class TradingMetrics extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Card(
+                  child: Container(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -75,7 +75,7 @@ class TradingMetrics extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Card(
+                  child: Container(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -106,7 +106,7 @@ class TradingMetrics extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Card(
+                  child: Container(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
