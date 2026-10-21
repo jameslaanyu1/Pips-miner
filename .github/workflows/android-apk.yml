@@ -1,5 +1,6 @@
-# Rebuild after fixing chronometer structure and PDF renderer types.
-# Rebuild after the scanned-PDF renderer API fix.
+# Release protocol: every successful push build on main is a stable release;
+# every successful feature/iv-options-zone-parser build is a tagged pre-release.
+# Both APK and SHA-256 checksum are verified and attached before publication.
 name: Build and Release Pips Miner APK
 
 on:
