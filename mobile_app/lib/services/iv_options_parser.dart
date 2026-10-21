@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pdfx/pdfx.dart';
+import 'package:pdfx/pdfx.dart' as pdfx;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -81,7 +81,7 @@ class IvOptionsParser {
     if (_hasLikelyPrice(embedded)) return embedded;
 
     // Screenshot/scanned PDFs have no text layer. Render every page and OCR it.
-    final pdf = await PdfDocumentX.openData(bytes);
+    final pdf = await pdfx.PdfDocument.openData(bytes);
     final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     final output = <String>[];
     Directory? tempDir;
@@ -97,7 +97,7 @@ class IvOptionsParser {
           final rendered = await page.render(
             width: (page.width * scale).round(),
             height: (page.height * scale).round(),
-            format: PdfPageImageFormat.png,
+            format: pdfx.PdfPageImageFormat.png,
           );
           if (rendered == null) continue;
           final imageFile = File('${tempDir.path}/pips_iv_page_${DateTime.now().microsecondsSinceEpoch}_$i.png');
