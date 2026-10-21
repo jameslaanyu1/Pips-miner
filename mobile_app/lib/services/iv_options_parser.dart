@@ -24,8 +24,10 @@ class OptionsZone {
 }
 
 class OptionsZonePlan {
-  const OptionsZonePlan({required this.zones, required this.referencePrice, required this.expiry, required this.sourceText, this.pivotPrice});
+  const OptionsZonePlan({required this.zones, required this.sevenStrikes, required this.referencePrice, required this.expiry, required this.sourceText, this.pivotPrice});
   final List<OptionsZone> zones;
+  /// All seven selected strike prices in ascending order; index 3 is always the pivot.
+  final List<double> sevenStrikes;
   final double referencePrice;
   final double? pivotPrice;
   final String? expiry;
@@ -33,6 +35,8 @@ class OptionsZonePlan {
 
   Map<String, dynamic> toJson() => {
     'zones': zones.map((z) => z.toJson()).toList(),
+    'strikes': sevenStrikes,
+    'pivotStrikeIndex': 3,
     'referencePrice': referencePrice,
     'pivotPrice': pivotPrice,
     'pivotIsTradingLevel': false,
@@ -87,7 +91,9 @@ class IvOptionsParser {
         final page = await pdf.getPage(i);
         try {
           // Render at a high resolution so small strike digits remain legible.
-          final scale = (2200 / page.width).clamp(1.0, 3.5);
+          // Render screenshot/scanned pages at a consistently high pixel width.
+          // The old 3.5x cap could leave small strike digits too soft on phone screenshots.
+          final scale = (3000 / page.width).clamp(2.0, 5.0);
           final rendered = await page.render(
             width: (page.width * scale).round(),
             height: (page.height * scale).round(),
@@ -138,8 +144,16 @@ class IvOptionsParser {
         .whereType<double>().where((v) => v >= 1000 && v <= 10000).toSet().length >= 7;
   }
 
+  String _normalizeOcrText(String source) {
+    // ML Kit can confuse O/ o with zero inside otherwise numeric strike prices.
+    return source
+        .replaceAllMapped(RegExp(r'(?<=\\d)[Oo](?=\\d)'), (_) => '0')
+        .replaceAll(RegExp(r'(?<=\\d),(?=\\d{3}\\b)'), '')
+        .replaceAll(RegExp(r'[\\t ]+'), ' ');
+  }
+
   OptionsZonePlan parseText(String source) {
-    final text = source.replaceAll(RegExp(r'(?<=\d),(?=\d{3}\b)'), '').replaceAll(RegExp(r'[\t ]+'), ' ');
+    final text = _normalizeOcrText(source);
     final values = <double>{};
     for (final match in RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text)) {
       final value = double.tryParse(match.group(1)!);
@@ -169,6 +183,7 @@ class IvOptionsParser {
     final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\s*[: ]?\s*)(\d{4}[-/]\d{2}[-/]\d{2})', caseSensitive: false).firstMatch(text);
     return OptionsZonePlan(
       zones: zones,
+      sevenStrikes: List<double>.unmodifiable(selected),
       referencePrice: spot ?? pivot,
       pivotPrice: pivot,
       expiry: expiryMatch?.group(1),
