@@ -1,3 +1,4 @@
+# Rebuild after the scanned-PDF renderer API fix.
 name: Build and Release Pips Miner APK
 
 on:
