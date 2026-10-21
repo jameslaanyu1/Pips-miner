@@ -145,13 +145,12 @@ class IvOptionsParser {
   }
 
   String _normalizeOcrText(String source) {
-    // ML Kit can confuse O/ o with zero inside otherwise numeric strike prices.
+    // ML Kit can confuse O/o with zero inside otherwise numeric strike prices.
     return source
-        .replaceAllMapped(RegExp(r'(?<=\\d)[Oo](?=\\d)'), (_) => '0')
-        .replaceAll(RegExp(r'(?<=\\d),(?=\\d{3}\\b)'), '')
-        .replaceAll(RegExp(r'[\\t ]+'), ' ');
+        .replaceAllMapped(RegExp(r'(?<=\d)[Oo](?=\d)'), (_) => '0')
+        .replaceAll(RegExp(r'(?<=\d),(?=\d{3}\b)'), '')
+        .replaceAll(RegExp(r'[\t ]+'), ' ');
   }
-
   OptionsZonePlan parseText(String source) {
     final text = _normalizeOcrText(source);
     final values = <double>{};
