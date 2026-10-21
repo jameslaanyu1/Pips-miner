@@ -95,8 +95,8 @@ class IvOptionsParser {
           // The old 3.5x cap could leave small strike digits too soft on phone screenshots.
           final scale = (3000 / page.width).clamp(2.0, 5.0);
           final rendered = await page.render(
-            width: (page.width * scale).round(),
-            height: (page.height * scale).round(),
+            width: page.width * scale,
+            height: page.height * scale,
             format: pdfx.PdfPageImageFormat.png,
           );
           if (rendered == null) continue;
@@ -107,7 +107,6 @@ class IvOptionsParser {
             if (recognized.text.trim().isNotEmpty) output.add(recognized.text);
           } finally {
             await imageFile.delete().catchError((_) => imageFile);
-            rendered.dispose();
           }
         } finally {
           await page.close();
