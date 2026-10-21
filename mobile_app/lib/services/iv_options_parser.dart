@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdfx/pdfx.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -21,15 +24,18 @@ class OptionsZone {
 }
 
 class OptionsZonePlan {
-  const OptionsZonePlan({required this.zones, required this.referencePrice, required this.expiry, required this.sourceText});
+  const OptionsZonePlan({required this.zones, required this.referencePrice, required this.expiry, required this.sourceText, this.pivotPrice});
   final List<OptionsZone> zones;
   final double referencePrice;
+  final double? pivotPrice;
   final String? expiry;
   final String sourceText;
 
   Map<String, dynamic> toJson() => {
     'zones': zones.map((z) => z.toJson()).toList(),
     'referencePrice': referencePrice,
+    'pivotPrice': pivotPrice,
+    'pivotIsTradingLevel': false,
     'expiry': expiry,
     'sourceText': sourceText,
     'approvedAt': DateTime.now().toUtc().toIso8601String(),
@@ -47,57 +53,110 @@ class IvOptionsParser {
     );
     if (result == null || result.files.isEmpty) throw const FormatException('No file selected.');
     final file = result.files.single;
-    final name = file.name.toLowerCase();
-    String text;
-    if (name.endsWith('.pdf')) {
-      final bytes = file.bytes ?? await File(file.path!).readAsBytes();
-      final document = PdfDocument(inputBytes: bytes);
-      try {
-        text = PdfTextExtractor(document).extractText();
-      } finally {
-        document.dispose();
-      }
-      if (text.trim().isEmpty) {
-        throw const FormatException('This PDF has no selectable text. Export its page as an image or upload a screenshot for OCR.');
-      }
-    } else {
-      final path = file.path;
-      if (path == null) throw const FormatException('Could not read the selected image.');
-      final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-      try {
-        final recognized = await recognizer.processImage(InputImage.fromFilePath(path));
-        text = recognized.text;
-      } finally {
-        await recognizer.close();
-      }
+    final bytes = file.bytes ?? (file.path == null ? null : await File(file.path!).readAsBytes());
+    if (bytes == null || bytes.isEmpty) throw const FormatException('The selected file is empty or cannot be read.');
+
+    final text = file.name.toLowerCase().endsWith('.pdf')
+        ? await _readPdf(bytes)
+        : await _recognizeImageBytes(bytes, file.name);
+    if (text.trim().isEmpty) {
+      throw const FormatException('No readable text was detected. Try a higher-resolution screenshot with the strike-price column fully visible.');
     }
     return parseText(text);
   }
 
+  Future<String> _readPdf(Uint8List bytes) async {
+    // First use embedded text; this is much more accurate for digitally generated PDFs.
+    final doc = PdfDocument(inputBytes: bytes);
+    String embedded;
+    try {
+      embedded = PdfTextExtractor(doc).extractText();
+    } finally {
+      doc.dispose();
+    }
+    if (_hasLikelyPrice(embedded)) return embedded;
+
+    // Screenshot/scanned PDFs have no text layer. Render every page and OCR it.
+    final pdf = await PdfDocumentX.openData(bytes);
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    final output = <String>[];
+    Directory? tempDir;
+    try {
+      tempDir = await getTemporaryDirectory();
+      for (var i = 1; i <= pdf.pagesCount; i++) {
+        final page = await pdf.getPage(i);
+        try {
+          // Render at a high resolution so small strike digits remain legible.
+          final scale = (2200 / page.width).clamp(1.0, 3.5);
+          final rendered = await page.render(
+            width: (page.width * scale).round(),
+            height: (page.height * scale).round(),
+            format: PdfPageImageFormat.png,
+          );
+          if (rendered == null) continue;
+          final imageFile = File('${tempDir.path}/pips_iv_page_${DateTime.now().microsecondsSinceEpoch}_$i.png');
+          try {
+            await imageFile.writeAsBytes(rendered.bytes, flush: true);
+            final recognized = await recognizer.processImage(InputImage.fromFilePath(imageFile.path));
+            if (recognized.text.trim().isNotEmpty) output.add(recognized.text);
+          } finally {
+            await imageFile.delete().catchError((_) => imageFile);
+            rendered.dispose();
+          }
+        } finally {
+          await page.close();
+        }
+      }
+    } finally {
+      await recognizer.close();
+      await pdf.close();
+    }
+    final ocrText = output.join('\n');
+    if (!_hasLikelyPrice(ocrText)) {
+      throw FormatException('PDF OCR could not confidently find enough gold strike prices. Detected text: ${ocrText.trim().isEmpty ? '(none)' : ocrText.substring(0, ocrText.length.clamp(0, 500))}');
+    }
+    return ocrText;
+  }
+
+  Future<String> _recognizeImageBytes(Uint8List bytes, String name) async {
+    final dir = await getTemporaryDirectory();
+    final extension = name.contains('.') ? name.split('.').last : 'jpg';
+    final imageFile = File('${dir.path}/pips_iv_${DateTime.now().microsecondsSinceEpoch}.$extension');
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    try {
+      await imageFile.writeAsBytes(bytes, flush: true);
+      return (await recognizer.processImage(InputImage.fromFilePath(imageFile.path))).text;
+    } finally {
+      await recognizer.close();
+      await imageFile.delete().catchError((_) => imageFile);
+    }
+  }
+
+  bool _hasLikelyPrice(String text) {
+    final matches = RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text);
+    return matches.map((m) => double.tryParse(m.group(1)!))
+        .whereType<double>().where((v) => v >= 1000 && v <= 10000).toSet().length >= 7;
+  }
+
   OptionsZonePlan parseText(String source) {
-    final text = source.replaceAll(',', '').replaceAll(RegExp(r'[\t ]+'), ' ');
+    final text = source.replaceAll(RegExp(r'(?<=\d),(?=\d{3}\b)'), '').replaceAll(RegExp(r'[\t ]+'), ' ');
     final values = <double>{};
-    // Gold strike prices are commonly four digits; avoid deltas/percentages.
     for (final match in RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text)) {
       final value = double.tryParse(match.group(1)!);
       if (value != null && value >= 1000 && value <= 10000) values.add(value);
     }
     if (values.length < 7) {
-      throw FormatException('Only ${values.length} possible gold strikes were found. Upload a clearer image/PDF with at least seven strike prices.');
+      throw FormatException('Only ${values.length} possible gold strikes were found. Upload a clearer image/PDF with at least seven distinct strike prices.');
     }
     final sorted = values.toList()..sort();
     final spotMatch = RegExp(r'(?:XAU\s*/?\s*USD|GOLD|SPOT)\D{0,30}(\d{4}(?:\.\d+)?)', caseSensitive: false).firstMatch(text);
     final spot = spotMatch == null ? null : double.tryParse(spotMatch.group(1)!);
-    // Select seven strikes nearest spot, then exclude the middle strike.
     final anchor = spot ?? sorted[sorted.length ~/ 2];
     final nearest = sorted.toList()..sort((a, b) => (a - anchor).abs().compareTo((b - anchor).abs()));
     final selected = nearest.take(7).toList()..sort();
-    if (selected.length < 7) {
-      throw const FormatException('Seven distinct gold strike prices are required to exclude the middle strike and create six zones.');
-    }
-    final reference = spot ?? selected[selected.length ~/ 2];
     final middleIndex = selected.length ~/ 2;
     final lower = selected.take(middleIndex).toList();
+    final pivot = selected[middleIndex];
     final upper = selected.skip(middleIndex + 1).toList();
     final zones = <OptionsZone>[
       OptionsZone(label: 'R3', price: upper[2], isResistance: true),
@@ -108,7 +167,13 @@ class IvOptionsParser {
       OptionsZone(label: 'S3', price: lower[0], isResistance: false),
     ];
     final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\s*[: ]?\s*)(\d{4}[-/]\d{2}[-/]\d{2})', caseSensitive: false).firstMatch(text);
-    return OptionsZonePlan(zones: zones, referencePrice: reference, expiry: expiryMatch?.group(1), sourceText: text);
+    return OptionsZonePlan(
+      zones: zones,
+      referencePrice: spot ?? pivot,
+      pivotPrice: pivot,
+      expiry: expiryMatch?.group(1),
+      sourceText: text,
+    );
   }
 
   Future<void> saveApprovedPlan(OptionsZonePlan plan) async {
