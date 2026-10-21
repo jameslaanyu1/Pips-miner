@@ -38,8 +38,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadConnection() async {
-    final token = await _storage.getMetaApiToken() ?? await _storage.getPipsMinerSessionToken();
-    final accountId = await _storage.getMetaApiAccountId() ?? await _storage.getPipsMinerAccountId();
+    final token = await _storage.getMetaApiToken();
+    final accountId = await _storage.getMetaApiAccountId();
     if (!mounted) return;
     setState(() {
       _loginController.text = accountId ?? '';
