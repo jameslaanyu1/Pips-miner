@@ -9,7 +9,7 @@ class LiveChart extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<BotProvider>(
       builder: (context, botProvider, _) {
-        return Card(
+        return Container(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
