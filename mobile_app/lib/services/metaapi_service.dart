@@ -37,7 +37,7 @@ class MetaApiService {
   }
 
   Future<String> _resolveRegion() {
-    if (_region != null) return Future.value(_region);
+    if (_region != null) return Future<String>.value(_region!);
     return _regionFuture ??= _fetchRegion();
   }
 
