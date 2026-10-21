@@ -5,6 +5,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class SecureStorageService {
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
+  static const String _metaApiTokenKey = 'metaapi_api_token';
+  static const String _metaApiAccountIdKey = 'metaapi_account_id';
+  // Legacy keys remain readable only for migration cleanup; they are never used as MetaApi credentials.
   static const String _pipsMinerSessionTokenKey = 'pips_miner_session_token';
   static const String _pipsMinerAccountIdKey = 'pips_miner_account_id';
 
@@ -36,6 +39,37 @@ class SecureStorageService {
   Future<void> clearPipsMinerSession() async {
     await _storage.delete(key: _pipsMinerSessionTokenKey);
     await _storage.delete(key: _pipsMinerAccountIdKey);
+  }
+
+  Future<void> saveMetaApiCredentials({
+    required String apiToken,
+    required String accountId,
+  }) async {
+    await _storage.write(key: _metaApiTokenKey, value: apiToken.trim());
+    await _storage.write(key: _metaApiAccountIdKey, value: accountId.trim());
+    // Remove obsolete backend session credentials so they cannot be mistaken
+    // for direct MetaApi credentials.
+    await clearPipsMinerSession();
+  }
+
+  Future<String?> getMetaApiToken() async =>
+      _storage.read(key: _metaApiTokenKey);
+
+  Future<String?> getMetaApiAccountId() async =>
+      _storage.read(key: _metaApiAccountIdKey);
+
+  Future<bool> hasMetaApiCredentials() async {
+    final token = await getMetaApiToken();
+    final accountId = await getMetaApiAccountId();
+    return token != null &&
+        token.trim().isNotEmpty &&
+        accountId != null &&
+        accountId.trim().isNotEmpty;
+  }
+
+  Future<void> clearMetaApiCredentials() async {
+    await _storage.delete(key: _metaApiTokenKey);
+    await _storage.delete(key: _metaApiAccountIdKey);
   }
 
   Future<void> saveTradingSymbol(String symbol) async {
