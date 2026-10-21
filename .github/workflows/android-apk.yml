@@ -307,13 +307,14 @@ jobs:
           compression-level: 0
 
       - name: Publish GitHub release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/iv-options-zone-parser'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Pips Miner v1.0.${{ github.run_number }}
+          tag_name: ${{ github.ref == 'refs/heads/main' && format('v1.0.{0}', github.run_number) || format('v1.0.{0}-iv-options-zone-parser', github.run_number) }}
+          name: ${{ github.ref == 'refs/heads/main' && format('Pips Miner v1.0.{0}', github.run_number) || format('Pips Miner v1.0.{0} — IV Options Parser Pre-release', github.run_number) }}
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
           generate_release_notes: true
-          make_latest: true
+          make_latest: ${{ github.ref == 'refs/heads/main' }}
           files: |
             Pips-Miner-release.apk
             Pips-Miner-release.apk.sha256
