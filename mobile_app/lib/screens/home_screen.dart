@@ -314,43 +314,4 @@ class _GearEnginePainter extends CustomPainter {
       oldDelegate.rotation != rotation || oldDelegate.running != running;
 }
 
-
-  DateTime? _startedAt;
-  Duration _elapsed = Duration.zero;
-  @override void initState() { super.initState(); if (widget.running) _startedAt = DateTime.now(); }
-  @override void didUpdateWidget(covariant _EngineChronometer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.running && !oldWidget.running) { _startedAt = DateTime.now(); _elapsed = Duration.zero; }
-    if (!widget.running && oldWidget.running && _startedAt != null) _elapsed = DateTime.now().difference(_startedAt!);
-  }
-  String _format(Duration d) => '${d.inHours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
-  @override Widget build(BuildContext context) {
-    final color = widget.running ? const Color(0xFF39FF75) : Colors.white38;
-    return Column(children: [
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.memory_rounded, color: color, size: 15), const SizedBox(width: 7), Text('ACTIVE ENGINE', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2)), const SizedBox(width: 8), Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle, boxShadow: [BoxShadow(color: color.withOpacity(.7), blurRadius: 8)]))]),
-      const SizedBox(height: 12),
-      StreamBuilder<int>(stream: Stream<int>.periodic(const Duration(seconds: 1), (n) => n), initialData: 0, builder: (context, snapshot) {
-        final elapsed = widget.running && _startedAt != null ? DateTime.now().difference(_startedAt!) : _elapsed;
-        return Text(_format(elapsed), style: TextStyle(color: color, fontSize: 35, fontWeight: FontWeight.w300, letterSpacing: 4, fontFamily: 'monospace', shadows: widget.running ? [Shadow(color: color.withOpacity(.38), blurRadius: 20)] : null));
-      }),
-      const SizedBox(height: 6),
-      Text(widget.running ? 'ENGINE RUNNING • LIVE CHRONOMETER' : 'ENGINE STOPPED • CHRONOMETER PAUSED', style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
-      const SizedBox(height: 15),
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        _readout('CYCLE', '${widget.cycle}'), Container(width: 1, height: 27, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 22)),
-        _readout('ACTIVE', '${widget.activeTrades.length}'), Container(width: 1, height: 27, color: Colors.white12, margin: const EdgeInsets.symmetric(horizontal: 22)),
-        _readout('TRAILING', '${widget.trailingTrades.length}'),
-      ]),
-      if (widget.activeTrades.isNotEmpty || widget.trailingTrades.isNotEmpty) ...[
-        const SizedBox(height: 13),
-        Wrap(alignment: WrapAlignment.center, spacing: 12, runSpacing: 7, children: [
-          ...widget.activeTrades.map((t) => Text('● ${t.direction} ${t.entryPrice?.toStringAsFixed(2) ?? ''}', style: TextStyle(color: t.direction == 'BUY' ? const Color(0xFF39FF75) : const Color(0xFFFF334F), fontSize: 9, fontWeight: FontWeight.w800))),
-          ...widget.trailingTrades.map((t) => Text('○ ${t.direction} ${t.price?.toStringAsFixed(2) ?? ''}', style: TextStyle(color: t.direction == 'BUY' ? const Color(0xFF39FF75) : const Color(0xFFFF334F), fontSize: 9, fontWeight: FontWeight.w700))),
-        ]),
-      ],
-    ]);
-  }
-  Widget _readout(String label, String value) => Column(children: [Text(value, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900)), const SizedBox(height: 4), Text(label, style: const TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w800, letterSpacing: 1.2))]);
-}
-
 class _MarketPainter extends CustomPainter { final double seed; _MarketPainter({required this.seed}); @override void paint(Canvas canvas, Size size) { final paint = Paint()..color = AppTheme.accentColor.withOpacity(.75)..strokeWidth = 2.0..style = PaintingStyle.stroke; final path = Path(); final random = math.Random(seed.abs().toInt() + 7); final points = <Offset>[]; for (var i = 0; i < 32; i++) { final x = size.width * i / 31; final noise = (random.nextDouble() - .5) * 18; final trend = (seed >= 0 ? -1 : 1) * i * .8; final y = size.height * .55 + noise + trend; points.add(Offset(x, y.clamp(8, size.height - 8))); } path.moveTo(points.first.dx, points.first.dy); for (var i = 1; i < points.length; i++) { path.lineTo(points[i].dx, points[i].dy); } canvas.drawPath(path, paint); } @override bool shouldRepaint(covariant _MarketPainter oldDelegate) => oldDelegate.seed != seed; }
