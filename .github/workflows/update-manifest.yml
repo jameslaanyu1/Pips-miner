@@ -4,13 +4,19 @@ on:
   workflow_run:
     workflows: ["Build and Release Pips Miner APK"]
     types: [completed]
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/update-manifest.yml"
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   update-manifest:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
@@ -18,49 +24,75 @@ jobs:
         with:
           ref: main
 
+      - name: Resolve successful main-branch APK build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          EVENT_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            RUN_NUMBER="$EVENT_RUN_NUMBER"
+          else
+            RUN_NUMBER="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/android-apk.yml/runs?branch=main&status=success&per_page=1" --jq '.workflow_runs[0].run_number // empty')"
+          fi
+          if [[ -z "$RUN_NUMBER" ]]; then
+            echo "ERROR: No successful APK build found on main."
+            exit 1
+          fi
+          echo "run_number=$RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Resolved successful main APK build #$RUN_NUMBER"
+
       - name: Verify published release and APK asset
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          RUN_NUMBER: ${{ steps.build.outputs.run_number }}
         run: |
           set -euo pipefail
           TAG="v1.0.${RUN_NUMBER}"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,assets > release.json
           python3 - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
-          release = json.loads(Path('release.json').read_text())
-          if release.get('tagName') != f"v1.0.{__import__('os').environ['RUN_NUMBER']}":
-              raise SystemExit('ERROR: release tag does not match successful workflow run')
-          assets = release.get('assets', [])
-          if not any(asset.get('name') == 'Pips-Miner-release.apk' and asset.get('size', 0) > 0 for asset in assets):
-              raise SystemExit('ERROR: published release does not contain a non-empty Pips-Miner-release.apk')
+          run_number = os.environ["RUN_NUMBER"]
+          release = json.loads(Path("release.json").read_text())
+          if release.get("tagName") != f"v1.0.{run_number}":
+              raise SystemExit("ERROR: release tag does not match successful workflow run")
+          assets = release.get("assets", [])
+          if not any(asset.get("name") == "Pips-Miner-release.apk" and asset.get("size", 0) > 0 for asset in assets):
+              raise SystemExit("ERROR: published release does not contain a non-empty Pips-Miner-release.apk")
           PY
 
       - name: Write latest release manifest
         env:
-          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          RUN_NUMBER: ${{ steps.build.outputs.run_number }}
         run: |
           python3 - <<'PY'
           import json, os
           from pathlib import Path
-          run_number = os.environ['RUN_NUMBER']
+          run_number = os.environ["RUN_NUMBER"]
           manifest = {
               "version": f"1.0.{run_number}",
               "download_url": f"https://github.com/jameslaanyu1/Pips-miner/releases/download/v1.0.{run_number}/Pips-Miner-release.apk",
               "release_url": "https://github.com/jameslaanyu1/Pips-miner/releases/latest",
           }
-          Path('update.json').write_text(json.dumps(manifest, indent=2) + chr(10))
+          Path("update.json").write_text(json.dumps(manifest, indent=2) + chr(10))
           PY
 
       - name: Commit manifest without triggering another APK build
+        env:
+          RUN_NUMBER: ${{ steps.build.outputs.run_number }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add update.json
           if git diff --cached --quiet; then
-            echo "Manifest already current."
+            echo "Manifest already current at v1.0.$RUN_NUMBER."
             exit 0
           fi
-          git commit -m "Update release manifest to v1.0.${{ github.event.workflow_run.run_number }} [skip ci]"
+          git commit -m "Update release manifest to v1.0.$RUN_NUMBER [skip ci]"
           git push origin main
