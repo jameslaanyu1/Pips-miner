@@ -387,9 +387,22 @@ class VelocityReversalEngine {
   Future<Map<String, dynamic>?> _zoneEntry(Map<String, dynamic> plan, double price, VelocityExpansionResult signal) async {
     final rawZones = plan['zones'];
     if (rawZones is! List || _liveCandles.length < 3) return null;
+
+    // The 4th strike is a reference-only pivot. Explicitly reject it even if
+    // a malformed/older saved plan accidentally includes it in the zones list.
+    if (plan['pivotIsTradingLevel'] == true) return null;
+    final pivotPrice = _number(plan['pivotPrice']);
+    final pivotIndex = (plan['pivotStrikeIndex'] as num?)?.toInt();
+    if (pivotIndex != null && pivotIndex != 3) return null;
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
       .map((z) => {'label': z['label']?.toString() ?? '', 'price': _number(z['price']), 'isResistance': z['isResistance'] == true})
-      .where((z) => z['price'] != null && (z['price'] as double) > 0).toList();
+      .where((z) {
+        final label = (z['label'] as String).toUpperCase();
+        final level = z['price'] as double?;
+        final isPivotLabel = label == 'PIVOT' || label == 'P' || label.contains('PIVOT');
+        final isPivotPrice = pivotPrice != null && level != null && (level - pivotPrice).abs() < 0.0000001;
+        return !isPivotLabel && !isPivotPrice && level != null && level > 0;
+      }).toList();
     final supports = zones.where((z) => z['isResistance'] == false).toList()
       ..sort((a,b) => (b['price'] as double).compareTo(a['price'] as double));
     final resistances = zones.where((z) => z['isResistance'] == true).toList()
