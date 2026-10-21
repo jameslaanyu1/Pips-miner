@@ -38,43 +38,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadConnection() async {
-    final broker = await _storage.getMt5Broker();
-    final login = await _storage.getMt5Login();
-    final server = await _storage.getMt5Server();
-    final password = await _storage.getMt5Password();
+    final token = await _storage.getMetaApiToken() ?? await _storage.getPipsMinerSessionToken();
+    final accountId = await _storage.getMetaApiAccountId() ?? await _storage.getPipsMinerAccountId();
     if (!mounted) return;
     setState(() {
-      _brokerController.text = broker ?? '';
-      _loginController.text = login ?? '';
-      _serverController.text = server ?? '';
-      _passwordController.text = password ?? '';
+      _loginController.text = accountId ?? '';
+      _passwordController.text = token ?? '';
+      _brokerController.clear();
+      _serverController.clear();
     });
   }
 
   Future<void> _connect(BotProvider bot) async {
-    final broker = _brokerController.text.trim();
-    final login = _loginController.text.trim();
-    final password = _passwordController.text;
-    final server = _serverController.text.trim();
-    if (login.isEmpty || password.isEmpty || server.isEmpty) {
+    final accountId = _loginController.text.trim();
+    final token = _passwordController.text.trim();
+    if (accountId.isEmpty || token.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a broker server, then enter your MT5 account number and trading password.')),
+        const SnackBar(content: Text('Enter your MetaApi account ID and account-scoped API token.')),
       );
       return;
     }
-    final success = await bot.connectMt5(login: login, password: password, server: server);
-    if (success) {
-      await _storage.saveMt5Connection(
-        broker: broker,
-        login: login,
-        server: server,
-        password: password,
-      );
-    }
+    final success = await bot.connectMetaApi(token: token, accountId: accountId);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'MT5 account connected successfully.' : bot.connectionError ?? 'MT5 connection failed.'),
+        content: Text(success ? 'MetaApi account connected successfully.' : bot.connectionError ?? 'MetaApi connection failed.'),
         backgroundColor: success ? AppTheme.successColor : AppTheme.errorColor,
       ),
     );
