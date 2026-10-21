@@ -57,7 +57,7 @@ class _BrokerAwareSymbolSectionState extends State<BrokerAwareSymbolSection> {
     final selected = widget.bot.symbol.toUpperCase();
     final query = _search.text.trim().toUpperCase();
     final results = _symbols.where((s) => query.isEmpty || s.contains(query)).take(60).toList();
-    return Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    return Container(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Row(children: [Icon(Icons.swap_horiz_rounded, size: 17, color: AppTheme.primaryColor), SizedBox(width: 8), Text('SYMBOL SWITCH', style: TextStyle(fontSize: 9.5, letterSpacing: 1.1, fontWeight: FontWeight.w800, color: Colors.white54))]),
       const SizedBox(height: 13),
       TextField(controller: _search, enabled: widget.bot.isConnected && !widget.bot.isBotRunning, textCapitalization: TextCapitalization.characters, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: 'SEARCH METAAPI SYMBOLS', hintText: 'XAUUSD, EURUSD, GOLD…', prefixIcon: const Icon(Icons.search_rounded), suffixIcon: IconButton(tooltip: 'Refresh symbols', onPressed: widget.bot.isConnected && !widget.bot.isBotRunning && !_loading ? _load : null, icon: _loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh_rounded)))),
