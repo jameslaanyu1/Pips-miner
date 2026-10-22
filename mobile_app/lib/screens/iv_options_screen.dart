@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 
 import '../services/iv_options_parser.dart';
 
@@ -14,6 +17,7 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
   bool _busy = false;
   String? _error;
   String? _savedFileName;
+  String? _savedFilePath;
 
   @override
   void initState() {
@@ -25,10 +29,14 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
     try {
       final saved = await _parser.loadSavedPlan();
       final fileName = await _parser.loadSavedSourceName();
+      final filePath = await _parser.loadSavedSourcePath();
+      final filePath = await _parser.loadSavedSourcePath();
       if (!mounted) return;
       setState(() {
         _plan = saved == null ? null : OptionsZonePlan.fromJson(saved);
         _savedFileName = fileName;
+        _savedFilePath = filePath;
+        _savedFilePath = filePath;
       });
     } catch (e) {
       if (mounted) setState(() => _error = 'Could not restore the saved options file: $e');
@@ -68,6 +76,26 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
             const Expanded(child: Text('Saved options file', style: TextStyle(fontWeight: FontWeight.bold))),
           ]),
           if (_savedFileName != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(_savedFileName!, style: const TextStyle(fontSize: 12, color: Colors.white70))),
+          if (_savedFilePath != null && File(_savedFilePath!).existsSync()) ...[
+            const SizedBox(height: 12),
+            const Text('ORIGINAL SOURCE FILE', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Container(
+              height: 460,
+              width: double.infinity,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(border: Border.all(color: Colors.white24), borderRadius: BorderRadius.circular(8)),
+              child: _savedFilePath!.toLowerCase().endsWith('.pdf')
+                  ? SfPdfViewer.file(File(_savedFilePath!))
+                  : InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 5,
+                      child: Image.file(File(_savedFilePath!), fit: BoxFit.contain),
+                    ),
+            ),
+            const SizedBox(height: 10),
+            const Text('This is the original uploaded file, not a recreated table.', style: TextStyle(fontSize: 12, color: Colors.white70)),
+          ],
           const SizedBox(height: 10),
           Text('Reference price: ${_plan!.referencePrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
           if (_plan!.expiry != null) Text('Detected expiry: ${_plan!.expiry}'),
