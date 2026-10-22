@@ -388,13 +388,11 @@ class VelocityReversalEngine {
     final rawZones = plan['zones'];
     if (rawZones is! List || _liveCandles.length < 3) return null;
 
-    // The fourth of the seven selected strikes is the pivot. It is metadata /
-    // display-only: never treat it as support or resistance, and never open a
-    // trade because price is testing the pivot.
+    // The pivot is a tradable level, handled independently from the three
+    // supports and three resistances so it does not distort their counts.
     final pivot = _number(plan['middleStrike'] ?? plan['pivotStrike']);
     final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
-    bool near(double level) => (price - level).abs() / level <= tolerance;
-    if (pivot != null && pivot > 0 && near(pivot)) return null;
+    bool near(double level) => level > 0 && (price - level).abs() / level <= tolerance;
 
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
       .map((z) => {'label': z['label']?.toString() ?? '', 'price': _number(z['price']), 'isResistance': z['isResistance'] == true})
@@ -414,6 +412,22 @@ class VelocityReversalEngine {
     final current = signal.currentVelocity;
     final topResistance = resistances.last['price'] as double;
     final bottomSupport = supports.last['price'] as double;
+
+    // Pivot trades: buy a downward test that begins to recover, or sell an
+    // upward test that begins to fade. Require price to remain on the
+    // corresponding side of the pivot to avoid trading a clean cross blindly.
+    if (pivot != null && pivot > 0 && near(pivot)) {
+      if (previous < 0 && current < 0 && current > previous && price >= pivot) {
+        _ivBias = 1;
+        await _saveIvState();
+        return {'buy': true};
+      }
+      if (previous > 0 && current > 0 && current < previous && price <= pivot) {
+        _ivBias = -1;
+        await _saveIvState();
+        return {'buy': false};
+      }
+    }
 
     // Breakouts are symmetric: break above resistance or below support, then
     // wait for a retracement/retest of the broken boundary before entering.
