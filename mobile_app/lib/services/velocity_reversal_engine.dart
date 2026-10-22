@@ -113,7 +113,7 @@ class VelocityReversalEngine {
       _busy = true;
       try {
         final buy = zoneSignal['buy'] as bool;
-        _optionsExitPrice = null;
+        _optionsExitPrice = _number(zoneSignal['target']);
         _optionsTrade = true;
         await _restoreIvState();
         _activeVolume = await _calculatePositionVolume(buy: buy);
@@ -321,6 +321,18 @@ class VelocityReversalEngine {
     final openPrice = _number(active['openPrice'] ?? active['price']) ?? _ivEntryPrice;
     if (direction == null || openPrice == null) return;
     _ivEntryPrice = openPrice;
+    final targetStrike = _optionsExitPrice;
+    if (targetStrike != null &&
+        (direction == EnginePositionDirection.buy ? price >= targetStrike : price <= targetStrike)) {
+      final id = active['id']?.toString();
+      if (id != null) {
+        await api.closePosition(id);
+        final stillOpen = (await api.positions()).whereType<Map>()
+            .map((p) => Map<String, dynamic>.from(p)).any((p) => p['id']?.toString() == id);
+        if (!stillOpen) await _clearIvTradeState();
+      }
+      return;
+    }
     final pipSize = await _pipSize();
     final favorable = direction == EnginePositionDirection.buy ? price - openPrice : openPrice - price;
     final adverse = -favorable;
@@ -394,7 +406,7 @@ class VelocityReversalEngine {
     final pivot = _number(plan['middleStrike'] ?? plan['pivotStrike']);
     final tolerance = (_number(plan['zoneTolerancePercent']) ?? 0.05) / 100.0;
     bool near(double level) => (price - level).abs() / level <= tolerance;
-    if (pivot != null && pivot > 0 && near(pivot)) return null;
+    // Pivot is a tradable strike when its parsed option data produces a valid signal.
 
     final zones = rawZones.whereType<Map>().map((z) => Map<String, dynamic>.from(z))
       .map((z) => {'label': z['label']?.toString() ?? '', 'price': _number(z['price']), 'isResistance': z['isResistance'] == true})
@@ -410,6 +422,44 @@ class VelocityReversalEngine {
     final resistances = zones.where((z) => z['isResistance'] == true).toList()
       ..sort((a,b) => (a['price'] as double).compareTo(b['price'] as double));
     if (supports.length != 3 || resistances.length != 3) return null;
+    final rawStrikes = plan['strikes'];
+    if (rawStrikes is List) {
+      final strikeRows = rawStrikes.whereType<Map>().map((r) => Map<String, dynamic>.from(r))
+          .where((r) => _number(r['strike']) != null)
+          .toList()
+        ..sort((a, b) => _number(a['strike'])!.compareTo(_number(b['strike'])!));
+      if (strikeRows.length >= 2) {
+        for (var i = 0; i < strikeRows.length; i++) {
+          final row = strikeRows[i];
+          final level = _number(row['strike']);
+          final putDelta = _number(row['putDelta']);
+          final putPrice = _number(row['putPrice']);
+          final callPrice = _number(row['callPrice']);
+          final callDelta = _number(row['callDelta']);
+          if (level == null || putDelta == null || putPrice == null || callPrice == null || callDelta == null || !near(level)) continue;
+          // Compare call and put option premiums at this same strike.
+          if (callDelta > 0.50 && callPrice > putPrice && i + 1 < strikeRows.length) {
+            final target = _number(strikeRows[i + 1]['strike']);
+            if (target != null && target > price) {
+              _optionsExitPrice = target;
+              _ivBias = 1;
+              await _saveIvState();
+              return {'buy': true, 'target': target, 'signal': 'call-premium'};
+            }
+          }
+          if (putDelta < -0.50 && putPrice > callPrice && i > 0) {
+            final target = _number(strikeRows[i - 1]['strike']);
+            if (target != null && target < price) {
+              _optionsExitPrice = target;
+              _ivBias = -1;
+              await _saveIvState();
+              return {'buy': false, 'target': target, 'signal': 'put-premium'};
+            }
+          }
+        }
+      }
+    }
+
     final previous = _liveCandles[_liveCandles.length - 2].close - _liveCandles[_liveCandles.length - 3].close;
     final current = signal.currentVelocity;
     final topResistance = resistances.last['price'] as double;

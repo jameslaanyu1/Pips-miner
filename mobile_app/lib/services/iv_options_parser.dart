@@ -8,6 +8,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
+class OptionStrikeData {
+  const OptionStrikeData({required this.strike, this.putDelta, this.putPrice, this.callPrice, this.callDelta, this.impliedVolatility});
+  final double strike; final double? putDelta, putPrice, callPrice, callDelta, impliedVolatility;
+  Map<String, dynamic> toJson() => {'strike': strike, 'putDelta': putDelta, 'putPrice': putPrice, 'callPrice': callPrice, 'callDelta': callDelta, 'impliedVolatility': impliedVolatility};
+  factory OptionStrikeData.fromJson(Map<String, dynamic> j) => OptionStrikeData(strike: (j['strike'] as num).toDouble(), putDelta: (j['putDelta'] as num?)?.toDouble(), putPrice: (j['putPrice'] as num?)?.toDouble(), callPrice: (j['callPrice'] as num?)?.toDouble(), callDelta: (j['callDelta'] as num?)?.toDouble(), impliedVolatility: (j['impliedVolatility'] as num?)?.toDouble());
+}
+
 class OptionsZone {
   const OptionsZone({required this.label, required this.price, required this.isResistance});
   final String label;
@@ -29,6 +36,7 @@ class OptionsZonePlan {
     required this.middleStrike,
     required this.expiry,
     required this.sourceText,
+    this.strikes = const [],
   });
   final List<OptionsZone> zones;
   final double referencePrice;
@@ -37,6 +45,7 @@ class OptionsZonePlan {
   final double middleStrike;
   final String? expiry;
   final String sourceText;
+  final List<OptionStrikeData> strikes;
 
   factory OptionsZonePlan.fromJson(Map<String, dynamic> json) => OptionsZonePlan(
     zones: (json['zones'] as List<dynamic>)
@@ -47,6 +56,7 @@ class OptionsZonePlan {
         ?? (json['referencePrice'] as num).toDouble(),
     expiry: json['expiry'] as String?,
     sourceText: json['sourceText'] as String? ?? '',
+    strikes: (json['strikes'] as List<dynamic>? ?? []).whereType<Map>().map((e) => OptionStrikeData.fromJson(Map<String, dynamic>.from(e))).toList(),
   );
 
   Map<String, dynamic> toJson() => {
@@ -55,6 +65,7 @@ class OptionsZonePlan {
     'middleStrike': middleStrike,
     'expiry': expiry,
     'sourceText': sourceText,
+    'strikes': strikes.map((s) => s.toJson()).toList(),
     'savedAt': DateTime.now().toUtc().toIso8601String(),
   };
 }
@@ -124,51 +135,30 @@ class IvOptionsParser {
 
   OptionsZonePlan parseText(String source) {
     final text = source.replaceAll(',', '').replaceAll(RegExp(r'[\t ]+'), ' ');
-    final values = <double>{};
-    for (final match in RegExp(r'(?<![\d.])(\d{4,5}(?:\.\d+)?)(?![\d.])').allMatches(text)) {
-      final value = double.tryParse(match.group(1)!);
-      if (value != null && value >= 1000 && value <= 10000) values.add(value);
+    final rows = <double, OptionStrikeData>{};
+    final pattern = RegExp(r'[-+]?\d+(?:\.\d+)?%?');
+    for (final line in text.split(RegExp(r'[\r\n]+'))) {
+      final tokens = pattern.allMatches(line).map((m) => m.group(0)!).toList();
+      final vals = tokens.map((t) => double.tryParse(t.replaceAll('%', ''))).toList();
+      final si = vals.indexWhere((v) => v != null && v >= 1000 && v <= 10000);
+      if (si < 2 || si + 3 >= vals.length) continue;
+      final left = vals.take(si).whereType<double>().toList(); final right = vals.skip(si + 1).whereType<double>().toList();
+      if (left.length < 2 || right.length < 2) continue;
+      final pd = left.first, pp = left.last, cp = right[0], cd = right[1];
+      double? iv; for (var i=0;i<tokens.length;i++) { if(tokens[i].contains('%')) iv=double.tryParse(tokens[i].replaceAll('%','')); }
+      if (iv == null && right.length > 2 && right.last >= 5 && right.last <= 150) iv=right.last;
+      if (pd < 0 && pd >= -1.1 && cd > 0 && cd <= 1.1 && pp > 0 && cp > 0) rows[vals[si]!] = OptionStrikeData(strike: vals[si]!, putDelta: pd, putPrice: pp, callPrice: cp, callDelta: cd, impliedVolatility: iv);
     }
-    if (values.length < 7) {
-      throw FormatException('Only ${values.length} possible gold strikes were found. Upload a clearer image/PDF with at least seven strike prices.');
-    }
-
-    final sorted = values.toList()..sort();
-    final spotMatch = RegExp(r'(?:XAU\s*/?\s*USD|GOLD|SPOT)\D{0,30}(\d{4}(?:\.\d+)?)', caseSensitive: false).firstMatch(text);
-    final spot = spotMatch == null ? null : double.tryParse(spotMatch.group(1)!);
-    final anchor = spot ?? sorted[sorted.length ~/ 2];
-    final nearest = sorted.toList()..sort((a, b) {
-      final distance = (a - anchor).abs().compareTo((b - anchor).abs());
-      return distance != 0 ? distance : a.compareTo(b);
-    });
-    final selected = nearest.take(7).toList()..sort();
-    if (selected.length != 7) {
-      throw const FormatException('Seven distinct gold strikes are required to create a pivot and six zones.');
-    }
-
-    final middleIndex = selected.length ~/ 2;
-    final lower = selected.take(middleIndex).toList();
-    final upper = selected.skip(middleIndex + 1).toList();
-    final middleStrike = selected[middleIndex];
-    final reference = spot ?? middleStrike;
-    final zones = <OptionsZone>[
-      OptionsZone(label: 'R3', price: upper[2], isResistance: true),
-      OptionsZone(label: 'R2', price: upper[1], isResistance: true),
-      OptionsZone(label: 'R1', price: upper[0], isResistance: true),
-      OptionsZone(label: 'S1', price: lower[2], isResistance: false),
-      OptionsZone(label: 'S2', price: lower[1], isResistance: false),
-      OptionsZone(label: 'S3', price: lower[0], isResistance: false),
-    ];
-    final expiryMatch = RegExp(r'(?:expir(?:y|ing|ation)?\s*[: ]?\s*)(\d{4}[-/]\d{2}[-/]\d{2})', caseSensitive: false).firstMatch(text);
-    return OptionsZonePlan(
-      zones: zones,
-      referencePrice: reference,
-      middleStrike: middleStrike,
-      expiry: expiryMatch?.group(1),
-      sourceText: text,
-    );
+    final strikes = rows.values.toList()..sort((a,b)=>a.strike.compareTo(b.strike));
+    if (strikes.length < 7) throw FormatException('Only ${strikes.length} complete option rows were parsed. Need seven rows with put delta/price, strike, call price/delta and IV. Try a clearer screenshot or text PDF.');
+    final spotMatch=RegExp(r'(?:XAU\s*/?\s*USD|GOLD|SPOT)\D{0,30}(\d{4}(?:\.\d+)?)',caseSensitive:false).firstMatch(text);
+    final spot=spotMatch==null?null:double.tryParse(spotMatch.group(1)!); final anchor=spot??strikes[strikes.length~/2].strike;
+    final nearest=strikes.toList()..sort((a,b){final d=(a.strike-anchor).abs().compareTo((b.strike-anchor).abs());return d!=0?d:a.strike.compareTo(b.strike);});
+    final selected=nearest.take(7).toList()..sort((a,b)=>a.strike.compareTo(b.strike)); final levels=selected.map((s)=>s.strike).toList(); final middle=levels[3];
+    final zones=<OptionsZone>[OptionsZone(label:'R3',price:levels[6],isResistance:true),OptionsZone(label:'R2',price:levels[5],isResistance:true),OptionsZone(label:'R1',price:levels[4],isResistance:true),OptionsZone(label:'S1',price:levels[2],isResistance:false),OptionsZone(label:'S2',price:levels[1],isResistance:false),OptionsZone(label:'S3',price:levels[0],isResistance:false)];
+    final expiry=RegExp(r'(?:expir(?:y|ing|ation)?\s*[: ]?\s*)(\d{4}[-/]\d{2}[-/]\d{2})',caseSensitive:false).firstMatch(text);
+    return OptionsZonePlan(zones:zones,referencePrice:spot??middle,middleStrike:middle,expiry:expiry?.group(1),sourceText:text,strikes:selected);
   }
-
   Future<void> saveApprovedPlan(OptionsZonePlan plan) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(storageKey, jsonEncode(plan.toJson()));
