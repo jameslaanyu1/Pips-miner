@@ -109,7 +109,6 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
           }),
           const SizedBox(height: 10),
           Text('Reference price: ${_plan!.referencePrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
- ${_plan!.referencePrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
           if (_plan!.expiry != null) Text('Detected expiry: ${_plan!.expiry}'),
           const SizedBox(height: 12),
           // The middle strike is shown separately in amber and is not a support/resistance zone.
