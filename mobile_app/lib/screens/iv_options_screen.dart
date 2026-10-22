@@ -1,8 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
-
 import '../services/iv_options_parser.dart';
 
 class IvOptionsScreen extends StatefulWidget {
@@ -17,7 +15,6 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
   bool _busy = false;
   String? _error;
   String? _savedFileName;
-  String? _savedFilePath;
 
   @override
   void initState() {
@@ -29,16 +26,31 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
     try {
       final saved = await _parser.loadSavedPlan();
       final fileName = await _parser.loadSavedSourceName();
-      final filePath = await _parser.loadSavedSourcePath();
       if (!mounted) return;
       setState(() {
         _plan = saved == null ? null : OptionsZonePlan.fromJson(saved);
         _savedFileName = fileName;
-        _savedFilePath = filePath;
       });
     } catch (e) {
       if (mounted) setState(() => _error = 'Could not restore the saved options file: $e');
     }
+  }
+
+  List<List<String>> _extractedRows(String source) {
+    final lines = source
+        .replaceAll('\r', '')
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    return lines.map((line) {
+      // Preserve columns when OCR/PDF extraction exposes tabs or aligned spacing.
+      var cells = line.split(RegExp(r'\\t+|\\s{2,}')).map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
+      // ML Kit sometimes collapses table spacing to single spaces; retain all
+      // recognized values as cells rather than dropping the line.
+      if (cells.length < 2) cells = line.split(RegExp(r'\\s+')).where((v) => v.isNotEmpty).toList();
+      return cells;
+    }).toList();
   }
 
   Future<void> _pickAndParse() async {
@@ -74,28 +86,32 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
             const Expanded(child: Text('Saved options file', style: TextStyle(fontWeight: FontWeight.bold))),
           ]),
           if (_savedFileName != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(_savedFileName!, style: const TextStyle(fontSize: 12, color: Colors.white70))),
-          if (_savedFilePath != null && File(_savedFilePath!).existsSync()) ...[
-            const SizedBox(height: 12),
-            const Text('ORIGINAL SOURCE FILE', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Container(
-              height: 460,
-              width: double.infinity,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(border: Border.all(color: Colors.white24), borderRadius: BorderRadius.circular(8)),
-              child: _savedFilePath!.toLowerCase().endsWith('.pdf')
-                  ? SfPdfViewer.file(File(_savedFilePath!))
-                  : InteractiveViewer(
-                      minScale: 0.5,
-                      maxScale: 5,
-                      child: Image.file(File(_savedFilePath!), fit: BoxFit.contain),
-                    ),
-            ),
-            const SizedBox(height: 10),
-            const Text('This is the original uploaded file, not a recreated table.', style: TextStyle(fontSize: 12, color: Colors.white70)),
-          ],
+          const SizedBox(height: 14),
+          const Text('EXTRACTED FILE CONTENTS', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Builder(builder: (context) {
+            final rows = _extractedRows(_plan!.sourceText);
+            final columnCount = rows.fold<int>(0, (max, row) => row.length > max ? row.length : max);
+            if (rows.isEmpty || columnCount == 0) {
+              return const Text('No readable rows were extracted from this file.');
+            }
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: List.generate(columnCount, (index) => DataColumn(
+                  label: Text(index == 0 ? 'Content / column 1' : 'Column ${index + 1}'),
+                )),
+                rows: rows.map((row) => DataRow(
+                  cells: List.generate(columnCount, (index) => DataCell(
+                    Text(index < row.length ? row[index] : '—'),
+                  )),
+                )).toList(),
+              ),
+            );
+          }),
           const SizedBox(height: 10),
           Text('Reference price: ${_plan!.referencePrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+ ${_plan!.referencePrice.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
           if (_plan!.expiry != null) Text('Detected expiry: ${_plan!.expiry}'),
           const SizedBox(height: 12),
           // The middle strike is shown separately in amber and is not a support/resistance zone.
