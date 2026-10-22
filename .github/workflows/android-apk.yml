@@ -2,7 +2,7 @@ name: Build and Release Pips Miner APK
 
 on:
   push:
-    branches: [main, feature/iv-options-zone-parser, feature/persist-iv-options-file]
+    branches: [main, feature/iv-options-zone-parser, feature/persist-iv-options-file, direct-metaapi-no-backend]
   workflow_dispatch:
 
 permissions:
