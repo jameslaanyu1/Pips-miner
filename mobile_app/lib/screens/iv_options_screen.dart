@@ -30,12 +30,10 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
       final saved = await _parser.loadSavedPlan();
       final fileName = await _parser.loadSavedSourceName();
       final filePath = await _parser.loadSavedSourcePath();
-      final filePath = await _parser.loadSavedSourcePath();
       if (!mounted) return;
       setState(() {
         _plan = saved == null ? null : OptionsZonePlan.fromJson(saved);
         _savedFileName = fileName;
-        _savedFilePath = filePath;
         _savedFilePath = filePath;
       });
     } catch (e) {
