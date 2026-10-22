@@ -195,7 +195,7 @@ class _ChronometerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width * .36, size.height * .43);
+    final double radius = math.min(size.width * .36, size.height * .43).toDouble();
     final dim = active ? color : Colors.white24;
     final base = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2..color = dim.withOpacity(active ? .25 : .12);
     for (var i = 0; i < 4; i++) {
