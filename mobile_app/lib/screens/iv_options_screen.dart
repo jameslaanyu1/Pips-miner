@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import '../services/iv_options_parser.dart';
 
@@ -45,10 +43,10 @@ class _IvOptionsScreenState extends State<IvOptionsScreen> {
         .toList();
     return lines.map((line) {
       // Preserve columns when OCR/PDF extraction exposes tabs or aligned spacing.
-      var cells = line.split(RegExp(r'\\t+|\\s{2,}')).map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
+      var cells = line.split(RegExp(r'\t+|\s{2,}')).map((v) => v.trim()).where((v) => v.isNotEmpty).toList();
       // ML Kit sometimes collapses table spacing to single spaces; retain all
       // recognized values as cells rather than dropping the line.
-      if (cells.length < 2) cells = line.split(RegExp(r'\\s+')).where((v) => v.isNotEmpty).toList();
+      if (cells.length < 2) cells = line.split(RegExp(r'\s+')).where((v) => v.isNotEmpty).toList();
       return cells;
     }).toList();
   }
