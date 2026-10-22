@@ -88,32 +88,11 @@ class IvOptionsParser {
     final bytes = file.bytes ?? (file.path == null ? null : await File(file.path!).readAsBytes());
     if (bytes == null || bytes.isEmpty) throw const FormatException('Could not read the selected file.');
 
-    String text;
-    if (lowerName.endsWith('.pdf')) {
-      final document = PdfDocument(inputBytes: bytes);
-      try {
-        text = PdfTextExtractor(document).extractText();
-      } finally {
-        document.dispose();
-      }
-      if (text.trim().isEmpty) {
-        throw const FormatException('This PDF has no selectable text. Export its page as an image or upload a screenshot for OCR.');
-      }
-    } else {
-      final existingPath = file.path;
-      final tempFile = existingPath == null
-          ? File('${(await getTemporaryDirectory()).path}/iv_options_ocr_${DateTime.now().microsecondsSinceEpoch}_${name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}')
-          : null;
-      if (tempFile != null) await tempFile.writeAsBytes(bytes, flush: true);
-      final imagePath = existingPath ?? tempFile!.path;
-      final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-      try {
-        final recognized = await recognizer.processImage(InputImage.fromFilePath(imagePath));
-        text = recognized.text;
-      } finally {
-        await recognizer.close();
-        if (tempFile != null && await tempFile.exists()) await tempFile.delete();
-      }
+    final text = lowerName.endsWith('.pdf')
+        ? await _extractPdfText(bytes)
+        : await _recognizeImage(bytes, file.path, name);
+    if (text.trim().isEmpty) {
+      throw const FormatException('No readable text was found. The original file has not replaced the previous saved file.');
     }
 
     // Keep the previous file and plan if this new file cannot be parsed.
@@ -121,6 +100,70 @@ class IvOptionsParser {
     await _persistSourceFile(name, bytes);
     await saveApprovedPlan(plan);
     return plan;
+  }
+
+  Future<String> _extractPdfText(Uint8List bytes) async {
+    final document = PdfDocument(inputBytes: bytes);
+    String text;
+    try {
+      text = PdfTextExtractor(document).extractText();
+    } finally {
+      document.dispose();
+    }
+    // Scanned PDFs usually have no text layer. Render each page and OCR it.
+    if (text.trim().length >= 40) return text;
+    final pdf = await PdfDocument.openData(bytes);
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    final directory = await getTemporaryDirectory();
+    final pageTexts = <String>[];
+    try {
+      for (var pageNumber = 1; pageNumber <= pdf.pagesCount; pageNumber++) {
+        final page = await pdf.getPage(pageNumber);
+        try {
+          final rendered = await page.render(
+            width: page.width * 2.2,
+            height: page.height * 2.2,
+            format: PdfPageImageFormat.png,
+          );
+          if (rendered == null) continue;
+          final imageFile = File('${directory.path}/iv_options_page_${DateTime.now().microsecondsSinceEpoch}_$pageNumber.png');
+          try {
+            await imageFile.writeAsBytes(rendered.bytes, flush: true);
+            final recognized = await recognizer.processImage(InputImage.fromFilePath(imageFile.path));
+            pageTexts.add('--- PAGE $pageNumber ---\\n${recognized.text}');
+          } finally {
+            if (await imageFile.exists()) await imageFile.delete();
+          }
+        } finally {
+          await page.close();
+        }
+      }
+    } finally {
+      await recognizer.close();
+      await pdf.close();
+    }
+    final ocrText = pageTexts.join('\\n');
+    return ocrText.trim().length > text.trim().length ? ocrText : text;
+  }
+
+  Future<String> _recognizeImage(Uint8List bytes, String? existingPath, String name) async {
+    final tempFile = existingPath == null
+        ? File('${(await getTemporaryDirectory()).path}/iv_options_ocr_${DateTime.now().microsecondsSinceEpoch}_${name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}')
+        : null;
+    if (tempFile != null) await tempFile.writeAsBytes(bytes, flush: true);
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
+    try {
+      final path = existingPath ?? tempFile!.path;
+      return (await recognizer.processImage(InputImage.fromFilePath(path))).text;
+    } finally {
+      await recognizer.close();
+      if (tempFile != null && await tempFile.exists()) await tempFile.delete();
+    }
+  }
+
+  Future<String?> loadSavedSourcePath() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(sourcePathKey);
   }
 
   Future<void> _persistSourceFile(String name, Uint8List bytes) async {
