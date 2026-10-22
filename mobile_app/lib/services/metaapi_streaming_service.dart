@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 /// Direct MetaApi real-time streaming client.
-/// The APK receives only an account-scoped reader token, never the admin token.
+/// Authenticates directly with the MetaApi API token saved in Android secure storage.
 class MetaApiStreamingService {
   MetaApiStreamingService({required this.token, required this.accountId, required this.streamUrl});
 

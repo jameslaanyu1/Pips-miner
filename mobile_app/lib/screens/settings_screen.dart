@@ -17,10 +17,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final SecureStorageService _storage = SecureStorageService();
-  final _brokerController = TextEditingController();
-  final _loginController = TextEditingController();
-  final _serverController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _apiTokenController = TextEditingController();
+  final _accountIdController = TextEditingController();
 
   @override
   void initState() {
@@ -30,51 +28,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    _brokerController.dispose();
-    _loginController.dispose();
-    _serverController.dispose();
-    _passwordController.dispose();
+    _apiTokenController.dispose();
+    _accountIdController.dispose();
     super.dispose();
   }
 
   Future<void> _loadConnection() async {
-    final broker = await _storage.getMt5Broker();
-    final login = await _storage.getMt5Login();
-    final server = await _storage.getMt5Server();
-    final password = await _storage.getMt5Password();
+    final token = await _storage.getMetaApiToken();
+    final accountId = await _storage.getMetaApiAccountId();
     if (!mounted) return;
     setState(() {
-      _brokerController.text = broker ?? '';
-      _loginController.text = login ?? '';
-      _serverController.text = server ?? '';
-      _passwordController.text = password ?? '';
+      _apiTokenController.text = token ?? '';
+      _accountIdController.text = accountId ?? '';
     });
   }
 
   Future<void> _connect(BotProvider bot) async {
-    final broker = _brokerController.text.trim();
-    final login = _loginController.text.trim();
-    final password = _passwordController.text;
-    final server = _serverController.text.trim();
-    if (login.isEmpty || password.isEmpty || server.isEmpty) {
+    final token = _apiTokenController.text.trim();
+    final accountId = _accountIdController.text.trim();
+    if (token.isEmpty || accountId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a broker server, then enter your MT5 account number and trading password.')),
+        const SnackBar(content: Text('Enter your MetaApi API access token and account ID.')),
       );
       return;
     }
-    final success = await bot.connectMt5(login: login, password: password, server: server);
-    if (success) {
-      await _storage.saveMt5Connection(
-        broker: broker,
-        login: login,
-        server: server,
-        password: password,
-      );
-    }
+    final success = await bot.connectMetaApi(apiToken: token, accountId: accountId);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'MT5 account connected successfully.' : bot.connectionError ?? 'MT5 connection failed.'),
+        content: Text(success ? 'MetaApi account connected successfully.' : bot.connectionError ?? 'MetaApi connection failed.'),
         backgroundColor: success ? AppTheme.successColor : AppTheme.errorColor,
       ),
     );
@@ -150,21 +132,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 14),
                     BrokerConnectionSection(
                       bot: bot,
-                      storage: _storage,
                       onConnect: _connect,
-                      brokerController: _brokerController,
-                      loginController: _loginController,
-                      serverController: _serverController,
-                      passwordController: _passwordController,
+                      apiTokenController: _apiTokenController,
+                      accountIdController: _accountIdController,
                     ),
                     const SizedBox(height: 14),
                     _ModeSection(bot: bot),
                     const SizedBox(height: 14),
-                    BrokerAwareSymbolSection(
-                      bot: bot,
-                      brokerController: _brokerController,
-                      serverController: _serverController,
-                    ),
+                    BrokerAwareSymbolSection(bot: bot),
                     const SizedBox(height: 14),
                     const _InfoSection(
                       title: 'STRATEGY',
