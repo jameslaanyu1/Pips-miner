@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdfx/pdfx.dart' as pdfx;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -112,7 +113,7 @@ class IvOptionsParser {
     }
     // Scanned PDFs usually have no text layer. Render each page and OCR it.
     if (text.trim().length >= 40) return text;
-    final pdf = await PdfDocument.openData(bytes);
+    final pdf = await pdfx.PdfDocument.openData(bytes);
     final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     final directory = await getTemporaryDirectory();
     final pageTexts = <String>[];
@@ -123,7 +124,7 @@ class IvOptionsParser {
           final rendered = await page.render(
             width: page.width * 2.2,
             height: page.height * 2.2,
-            format: PdfPageImageFormat.png,
+            format: pdfx.PdfPageImageFormat.png,
           );
           if (rendered == null) continue;
           final imageFile = File('${directory.path}/iv_options_page_${DateTime.now().microsecondsSinceEpoch}_$pageNumber.png');
